@@ -52,7 +52,7 @@ uv sync
 uv run python main.py
 ```
 
-開啟 <http://localhost:8000> → 建立房間 → 連接手環 → 分享監看連結。
+開啟 <http://localhost:18080> → 建立房間 → 連接手環 → 分享監看連結。
 
 ## Firebase 模式
 
