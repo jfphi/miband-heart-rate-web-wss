@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomCode": {
+        ".read": true,
+        "meta": {
+          ".write": "!data.exists()",
+          ".validate": "newData.hasChildren(['createdAt', 'createdByName']) && newData.child('createdAt').isNumber() && newData.child('createdByName').isString() && newData.child('createdByName').val().length <= 32"
+        },
+        "members": {
+          "$clientId": {
+            ".write": true,
+            ".validate": "newData.hasChildren(['name', 'role', 'online', 'updatedAt']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 32 && (newData.child('role').val() === 'publisher' || newData.child('role').val() === 'viewer') && newData.child('online').isBoolean() && newData.child('updatedAt').isNumber() && (!newData.hasChild('bpm') || newData.child('bpm').val() === null || (newData.child('bpm').isNumber() && newData.child('bpm').val() >= 0 && newData.child('bpm').val() <= 250)) && (!newData.hasChild('contact') || newData.child('contact').isBoolean())"
+          }
+        }
+      }
+    }
+  }
+}

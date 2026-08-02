@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>多人心率監看</title>
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <h1 class="brand">多人心率監看</h1>
+      <p class="lead">
+        用 Chrome / Edge 連接小米手環心率廣播，即時同步給房間內其他人監看。
+        支援 Firebase Spark 或本機 FastAPI WebSocket。
+      </p>
+
+      <div class="grid-2">
+        <section class="panel">
+          <h2>建立房間（發布）</h2>
+          <label for="createName">暱稱</label>
+          <input id="createName" maxlength="32" placeholder="例如：Alice" />
+
+          <label>即時後端</label>
+          <div class="backend-switch" id="createBackend">
+            <button type="button" class="secondary" data-backend="wss">FastAPI WSS</button>
+            <button type="button" class="secondary" data-backend="firebase">Firebase</button>
+          </div>
+
+          <div class="stack">
+            <button id="createBtn" type="button">建立房間並發布</button>
+          </div>
+          <p class="hint" style="margin-top: 12px">
+            發布端需開啟手環「心率廣播」，並使用支援 Web Bluetooth 的瀏覽器。
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>加入監看</h2>
+          <label for="joinName">暱稱</label>
+          <input id="joinName" maxlength="32" placeholder="例如：觀眾" />
+
+          <label for="joinRoom">房間碼</label>
+          <input
+            id="joinRoom"
+            maxlength="12"
+            placeholder="例如：A3K9QX"
+            style="text-transform: uppercase"
+          />
+
+          <label>即時後端（需與發布端相同）</label>
+          <div class="backend-switch" id="joinBackend">
+            <button type="button" class="secondary" data-backend="wss">FastAPI WSS</button>
+            <button type="button" class="secondary" data-backend="firebase">Firebase</button>
+          </div>
+
+          <button id="joinBtn" type="button">進入監看頁</button>
+        </section>
+      </div>
+
+      <p id="homeError" class="error" hidden></p>
+      <p class="footer-note">房間碼等同邀請連結。兩種後端的房間互不相通。</p>
+    </main>
+    <script type="module" src="./js/app-home.js"></script>
+  </body>
+</html>

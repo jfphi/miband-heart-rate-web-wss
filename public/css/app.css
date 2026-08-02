@@ -1,0 +1,275 @@
+:root {
+  --bg0: #0b1220;
+  --bg1: #14213d;
+  --accent: #e63946;
+  --accent-2: #48cae4;
+  --text: #f1faee;
+  --muted: #a8b2c1;
+  --card: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.12);
+  --ok: #2a9d8f;
+  --warn: #e9c46a;
+  --danger: #e63946;
+  --font-display: "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+  --font-mono: "Cascadia Mono", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-display);
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(72, 202, 228, 0.18), transparent 50%),
+    radial-gradient(900px 500px at 90% 0%, rgba(230, 57, 70, 0.16), transparent 45%),
+    linear-gradient(160deg, var(--bg0), var(--bg1));
+}
+
+body {
+  padding: 24px 16px 48px;
+}
+
+a {
+  color: var(--accent-2);
+}
+
+.shell {
+  width: min(960px, 100%);
+  margin: 0 auto;
+}
+
+.brand {
+  font-size: clamp(1.6rem, 4vw, 2.2rem);
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  margin: 0 0 8px;
+}
+
+.lead {
+  color: var(--muted);
+  margin: 0 0 28px;
+  line-height: 1.5;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  backdrop-filter: blur(10px);
+}
+
+.grid-2 {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 720px) {
+  .grid-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+input,
+select,
+button,
+textarea {
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  margin-bottom: 14px;
+}
+
+.backend-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.backend-switch button {
+  flex: 1;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, var(--accent), #ff6b6b);
+  color: white;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.active {
+  outline: 2px solid var(--accent-2);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.room-code {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  letter-spacing: 0.12em;
+  color: var(--accent-2);
+}
+
+.bpm {
+  font-size: clamp(3.5rem, 12vw, 5.5rem);
+  font-weight: 800;
+  line-height: 1;
+  margin: 8px 0;
+}
+
+.bpm.pulse {
+  animation: pulse 0.45s ease;
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(1.08);
+    color: #ff8fa3;
+  }
+  to {
+    transform: scale(1);
+    color: var(--text);
+  }
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.85rem;
+}
+
+.status::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.status.connected::before {
+  background: var(--ok);
+}
+.status.scanning::before,
+.status.connecting::before {
+  background: var(--warn);
+}
+.status.disconnected::before,
+.status.error::before {
+  background: var(--danger);
+}
+
+.error {
+  color: #ffb4b4;
+  white-space: pre-wrap;
+  margin-top: 12px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  min-height: 140px;
+}
+
+.card.stale {
+  opacity: 0.55;
+}
+
+.card .name {
+  font-weight: 650;
+  margin-bottom: 4px;
+}
+
+.card .card-bpm {
+  font-size: 2.4rem;
+  font-weight: 800;
+  margin: 8px 0 4px;
+}
+
+.card .tag {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.footer-note {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}

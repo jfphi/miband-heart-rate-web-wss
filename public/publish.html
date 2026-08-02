@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>發布心率</title>
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <div class="topbar">
+        <div>
+          <h1 class="brand">發布心率</h1>
+          <p class="lead" style="margin-bottom: 0">連接手環並推送到房間</p>
+        </div>
+        <a class="meta" href="./index.html">← 回首頁</a>
+      </div>
+
+      <section class="panel">
+        <div class="row" style="justify-content: space-between">
+          <div>
+            <div class="meta">房間碼</div>
+            <div class="room-code" id="roomCode">------</div>
+          </div>
+          <div>
+            <div class="meta">後端</div>
+            <div id="backendLabel">—</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 16px">
+          <span class="status idle" id="roomStatus">房間未連線</span>
+          <span class="status idle" id="bleStatus">藍牙未連線</span>
+        </div>
+
+        <div class="bpm" id="bpm">--</div>
+        <div class="meta" id="contact">佩戴狀態：—</div>
+        <div class="meta" id="rosterMeta">房間人數：0</div>
+
+        <div class="row" style="margin-top: 18px">
+          <button id="connectBle" type="button">連接小米手環</button>
+          <button id="disconnectBle" class="secondary" type="button" disabled>斷開藍牙</button>
+          <button id="copyLink" class="secondary" type="button">複製監看連結</button>
+        </div>
+
+        <p id="error" class="error" hidden></p>
+        <p class="hint" style="margin-top: 14px">
+          請先在手環設定開啟心率廣播 / Share HR。僅 Chrome、Edge 可作為發布端。
+        </p>
+      </section>
+    </main>
+    <script type="module" src="./js/publish.js"></script>
+  </body>
+</html>

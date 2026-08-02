@@ -1,0 +1,135 @@
+import { MiBandBle } from './ble.js';
+import { createTransport, normalizeBackend } from './transport/index.js';
+import { appConfig } from './config.js';
+import { getOrCreateClientId, parseQuery } from './util.js';
+
+const qs = parseQuery();
+const room = (qs.get('room') || '').toUpperCase();
+const name = qs.get('name') || '匿名';
+const backend = normalizeBackend(qs.get('backend'), appConfig.defaultBackend || 'wss');
+
+const el = {
+  roomCode: document.getElementById('roomCode'),
+  backendLabel: document.getElementById('backendLabel'),
+  roomStatus: document.getElementById('roomStatus'),
+  bleStatus: document.getElementById('bleStatus'),
+  bpm: document.getElementById('bpm'),
+  contact: document.getElementById('contact'),
+  rosterMeta: document.getElementById('rosterMeta'),
+  error: document.getElementById('error'),
+  connectBle: document.getElementById('connectBle'),
+  disconnectBle: document.getElementById('disconnectBle'),
+  copyLink: document.getElementById('copyLink'),
+};
+
+el.roomCode.textContent = room || '------';
+el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
+
+function setStatus(node, kind, text) {
+  node.className = `status ${kind}`;
+  node.textContent = text;
+}
+
+function showError(msg) {
+  el.error.hidden = !msg;
+  el.error.textContent = msg || '';
+}
+
+if (!room) {
+  showError('缺少房間碼，請從首頁建立房間');
+  el.connectBle.disabled = true;
+}
+
+let transport = null;
+const clientId = getOrCreateClientId();
+let lastBpm = null;
+
+const ble = new MiBandBle({
+  onHeartRate: async ({ bpm, contact }) => {
+    if (bpm !== lastBpm) {
+      el.bpm.textContent = String(bpm);
+      el.bpm.classList.remove('pulse');
+      void el.bpm.offsetWidth;
+      el.bpm.classList.add('pulse');
+      lastBpm = bpm;
+    }
+    el.contact.textContent =
+      contact === null || contact === undefined
+        ? '佩戴狀態：未知'
+        : contact
+          ? '佩戴狀態：已接觸'
+          : '佩戴狀態：未接觸';
+    try {
+      await transport?.publishHr({ bpm, contact: Boolean(contact), ts: Date.now() });
+    } catch (err) {
+      showError(err.message || String(err));
+    }
+  },
+  onStatus: (kind, text) => setStatus(el.bleStatus, kind, text),
+  onError: (msg) => showError(msg),
+});
+
+el.connectBle.addEventListener('click', async () => {
+  showError('');
+  el.connectBle.disabled = true;
+  try {
+    await ble.connect();
+    el.disconnectBle.disabled = false;
+  } catch (err) {
+    showError(err.message || String(err));
+    el.connectBle.disabled = false;
+  }
+});
+
+el.disconnectBle.addEventListener('click', async () => {
+  await ble.disconnect();
+  el.connectBle.disabled = false;
+  el.disconnectBle.disabled = true;
+});
+
+el.copyLink.addEventListener('click', async () => {
+  if (!transport) return;
+  const url = transport.getShareUrl({ roomCode: room, role: 'viewer' });
+  try {
+    await navigator.clipboard.writeText(url);
+    el.copyLink.textContent = '已複製！';
+    setTimeout(() => {
+      el.copyLink.textContent = '複製監看連結';
+    }, 1500);
+  } catch {
+    prompt('複製以下監看連結：', url);
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  transport?.leaveRoom();
+});
+
+async function init() {
+  if (!room) return;
+  setStatus(el.roomStatus, 'connecting', '加入房間中…');
+  try {
+    transport = await createTransport(backend);
+    await transport.joinRoom({
+      roomCode: room,
+      role: 'publisher',
+      name,
+      clientId,
+      onRoster: (members) => {
+        const online = members.filter((m) => m.online !== false).length;
+        const publishers = members.filter((m) => m.role === 'publisher').length;
+        el.rosterMeta.textContent = `房間人數：${online}（發布者 ${publishers}）`;
+      },
+      onError: (msg) => {
+        showError(msg);
+        setStatus(el.roomStatus, 'error', '房間連線錯誤');
+      },
+    });
+    setStatus(el.roomStatus, 'connected', '房間已連線');
+  } catch (err) {
+    showError(err.message || String(err));
+    setStatus(el.roomStatus, 'error', '無法加入房間');
+  }
+}
+
+init();

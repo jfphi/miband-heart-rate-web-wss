@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>監看心率</title>
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <div class="topbar">
+        <div>
+          <h1 class="brand">監看心率</h1>
+          <p class="lead" style="margin-bottom: 0">即時查看房間內所有發布者</p>
+        </div>
+        <a class="meta" href="./index.html">← 回首頁</a>
+      </div>
+
+      <section class="panel">
+        <div class="row" style="justify-content: space-between">
+          <div>
+            <div class="meta">房間碼</div>
+            <div class="room-code" id="roomCode">------</div>
+          </div>
+          <div>
+            <div class="meta">後端</div>
+            <div id="backendLabel">—</div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: 14px">
+          <span class="status idle" id="roomStatus">連線中…</span>
+          <span class="meta" id="viewerName"></span>
+        </div>
+
+        <div class="cards" id="cards"></div>
+        <p id="empty" class="hint">尚無發布者，等待有人連接手環…</p>
+        <p id="error" class="error" hidden></p>
+      </section>
+    </main>
+    <script type="module" src="./js/watch.js"></script>
+  </body>
+</html>
