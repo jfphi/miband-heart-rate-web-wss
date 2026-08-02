@@ -11,8 +11,10 @@ dist/
 
 # Local secrets / overrides
 public/js/config.local.js
+public/js/config.generated.js
 .env
-.env.*
+.env.local
+!.env.example
 
 # OS / IDE
 .DS_Store

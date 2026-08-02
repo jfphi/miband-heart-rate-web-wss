@@ -1,5 +1,4 @@
-import { createTransport, normalizeBackend } from './transport/index.js';
-import { appConfig } from './config.js';
+import { createTransport, getConfiguredBackend } from './transport/index.js';
 import {
   formatAge,
   getOrCreateClientId,
@@ -10,7 +9,6 @@ import {
 const qs = parseQuery();
 const room = (qs.get('room') || '').toUpperCase();
 const name = qs.get('name') || '觀眾';
-const backend = normalizeBackend(qs.get('backend'), appConfig.defaultBackend || 'wss');
 
 const el = {
   roomCode: document.getElementById('roomCode'),
@@ -23,7 +21,6 @@ const el = {
 };
 
 el.roomCode.textContent = room || '------';
-el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
 el.viewerName.textContent = `你是：${name}`;
 
 let members = [];
@@ -68,13 +65,18 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;');
 }
 
-if (!room) {
-  showError('缺少房間碼');
-  setStatus('error', '無效連結');
-} else {
-  let transport = null;
+async function init() {
+  const backend = await getConfiguredBackend();
+  el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
 
-  createTransport(backend)
+  if (!room) {
+    showError('缺少房間碼');
+    setStatus('error', '無效連結');
+    return;
+  }
+
+  let transport = null;
+  createTransport()
     .then((t) => {
       transport = t;
       return transport.joinRoom({
@@ -105,3 +107,5 @@ if (!room) {
 
   setInterval(render, 1000);
 }
+
+init();

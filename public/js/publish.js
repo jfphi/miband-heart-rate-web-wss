@@ -1,12 +1,10 @@
 import { MiBandBle } from './ble.js';
-import { createTransport, normalizeBackend } from './transport/index.js';
-import { appConfig } from './config.js';
+import { createTransport, getConfiguredBackend } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
 const qs = parseQuery();
 const room = (qs.get('room') || '').toUpperCase();
 const name = qs.get('name') || '匿名';
-const backend = normalizeBackend(qs.get('backend'), appConfig.defaultBackend || 'wss');
 
 const el = {
   roomCode: document.getElementById('roomCode'),
@@ -23,7 +21,6 @@ const el = {
 };
 
 el.roomCode.textContent = room || '------';
-el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
 
 function setStatus(node, kind, text) {
   node.className = `status ${kind}`;
@@ -106,10 +103,13 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function init() {
+  const backend = await getConfiguredBackend();
+  el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
   if (!room) return;
+
   setStatus(el.roomStatus, 'connecting', '加入房間中…');
   try {
-    transport = await createTransport(backend);
+    transport = await createTransport();
     await transport.joinRoom({
       roomCode: room,
       role: 'publisher',

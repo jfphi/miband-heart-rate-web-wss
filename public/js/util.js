@@ -19,12 +19,6 @@ export function getOrCreateClientId() {
   return id;
 }
 
-export function normalizeBackend(value, fallback = 'wss') {
-  const v = String(value || '').toLowerCase();
-  if (v === 'firebase' || v === 'wss') return v;
-  return fallback;
-}
-
 export function parseQuery() {
   return new URLSearchParams(window.location.search);
 }

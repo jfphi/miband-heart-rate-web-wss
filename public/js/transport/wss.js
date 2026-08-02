@@ -1,14 +1,12 @@
-import { appConfig } from '../config.js';
 import { createHrThrottle, generateRoomCode } from '../util.js';
 
-function resolveWsUrl() {
-  if (appConfig.wsUrl) return appConfig.wsUrl;
+function resolveWsUrl(cfg) {
+  if (cfg?.wsUrl) return cfg.wsUrl;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const host = location.port ? `${location.hostname}:${location.port}` : location.host;
-  return `${proto}://${host}/ws`;
+  return `${proto}://${location.host}/ws`;
 }
 
-export function createWssTransport() {
+export function createWssTransport(cfg) {
   let ws = null;
   let roomCode = null;
   let clientId = null;
@@ -117,7 +115,7 @@ export function createWssTransport() {
     }
 
     openPromise = new Promise((resolve, reject) => {
-      const url = resolveWsUrl();
+      const url = resolveWsUrl(cfg);
       ws = new WebSocket(url);
 
       ws.addEventListener('open', () => resolve());
@@ -200,7 +198,6 @@ export function createWssTransport() {
       const page = shareRole === 'publisher' ? 'publish.html' : 'watch.html';
       const url = new URL(page, window.location.href);
       url.searchParams.set('room', code);
-      url.searchParams.set('backend', 'wss');
       return url.toString();
     },
   };

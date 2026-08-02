@@ -8,15 +8,14 @@ import {
   onDisconnect,
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js';
-import { appConfig } from '../config.js';
 import { createHrThrottle, generateRoomCode } from '../util.js';
 
-function assertFirebaseConfig() {
-  const cfg = appConfig.firebase || {};
-  if (!cfg.apiKey || !cfg.databaseURL || !cfg.projectId) {
-    throw new Error('尚未設定 Firebase：請編輯 public/js/config.js（可參考 config.example.js）');
+function assertFirebaseConfig(cfg) {
+  const firebase = cfg?.firebase || {};
+  if (!firebase.apiKey || !firebase.databaseURL || !firebase.projectId) {
+    throw new Error('尚未在 .env 設定 Firebase（MIBAND_FIREBASE_*）');
   }
-  return cfg;
+  return firebase;
 }
 
 function toMember(clientId, raw) {
@@ -32,9 +31,9 @@ function toMember(clientId, raw) {
   };
 }
 
-export function createFirebaseTransport() {
-  const cfg = assertFirebaseConfig();
-  const app = initializeApp(cfg, `miband-${cfg.projectId}`);
+export function createFirebaseTransport(cfg) {
+  const firebaseCfg = assertFirebaseConfig(cfg);
+  const app = initializeApp(firebaseCfg, `miband-${firebaseCfg.projectId}`);
   const db = getDatabase(app);
 
   let roomCode = null;
@@ -150,7 +149,6 @@ export function createFirebaseTransport() {
       const page = shareRole === 'publisher' ? 'publish.html' : 'watch.html';
       const url = new URL(page, window.location.href);
       url.searchParams.set('room', code);
-      url.searchParams.set('backend', 'firebase');
       return url.toString();
     },
   };

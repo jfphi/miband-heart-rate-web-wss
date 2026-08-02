@@ -1,14 +1,16 @@
-import { normalizeBackend } from '../util.js';
-import { appConfig } from '../config.js';
+import { loadConfig } from '../config.js';
 
-export async function createTransport(backend) {
-  const resolved = normalizeBackend(backend, appConfig.defaultBackend || 'wss');
-  if (resolved === 'firebase') {
+export async function createTransport() {
+  const cfg = await loadConfig();
+  if (cfg.backend === 'firebase') {
     const { createFirebaseTransport } = await import('./firebase.js');
-    return createFirebaseTransport();
+    return createFirebaseTransport(cfg);
   }
   const { createWssTransport } = await import('./wss.js');
-  return createWssTransport();
+  return createWssTransport(cfg);
 }
 
-export { normalizeBackend };
+export async function getConfiguredBackend() {
+  const cfg = await loadConfig();
+  return cfg.backend;
+}

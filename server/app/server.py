@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, Response
 
 from .protocol import error_message, member_public
 from .rooms import rooms
+from .settings import get_public_config
 
 PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
 ROOM_RE = re.compile(r"^[A-Z0-9]{4,12}$")
@@ -29,6 +30,12 @@ app.add_middleware(
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+async def public_config() -> dict:
+    """前端用的公開設定（來源：.env 的 MIBAND_*）。"""
+    return get_public_config()
 
 
 def _now_ms() -> int:
