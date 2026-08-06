@@ -1,3 +1,4 @@
+import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
 import { createTransport, getConfiguredBackend } from './transport/index.js';
 import {
   formatAge,
@@ -24,6 +25,8 @@ el.roomCode.textContent = room || '------';
 el.viewerName.textContent = `你是：${name}`;
 
 let members = [];
+/** @type {Map<string, { t: number, bpm: number }[]>} */
+const hrHistory = new Map();
 
 function setStatus(kind, text) {
   el.roomStatus.className = `status ${kind}`;
@@ -35,9 +38,25 @@ function showError(msg) {
   el.error.textContent = msg || '';
 }
 
+function syncHistory(list) {
+  const alive = new Set();
+  for (const m of list) {
+    if (m.role !== 'publisher') continue;
+    alive.add(m.clientId);
+    if (m.bpm == null) continue;
+    const prev = hrHistory.get(m.clientId) || [];
+    const t = m.updatedAt || Date.now();
+    hrHistory.set(m.clientId, pushHrSample(prev, m.bpm, t));
+  }
+  for (const id of hrHistory.keys()) {
+    if (!alive.has(id)) hrHistory.delete(id);
+  }
+}
+
 function render() {
   const publishers = members.filter((m) => m.role === 'publisher');
   el.empty.hidden = publishers.length > 0;
+  const now = Date.now();
   el.cards.innerHTML = publishers
     .map((m) => {
       const stale = !m.online || isStale(m.updatedAt);
@@ -45,12 +64,18 @@ function render() {
       const contact =
         m.contact === true ? '已佩戴' : m.contact === false ? '未接觸' : '未知';
       const signal = stale ? '訊號中斷' : '即時';
+      const points = pruneHrHistory(hrHistory.get(m.clientId) || [], now);
+      hrHistory.set(m.clientId, points);
       return `
         <article class="card ${stale ? 'stale' : ''}">
           <div class="name">${escapeHtml(m.name)}</div>
           <div class="card-bpm">${bpm}</div>
           <div class="tag">BPM · ${contact}</div>
           <div class="tag">${signal} · ${formatAge(m.updatedAt)}</div>
+          <div class="hr-chart-wrap">
+            <div class="hr-chart-label">近 60 秒</div>
+            ${renderHrSparkline(points, { now })}
+          </div>
         </article>
       `;
     })
@@ -86,6 +111,7 @@ async function init() {
         clientId: getOrCreateClientId(),
         onRoster: (list) => {
           members = list;
+          syncHistory(list);
           render();
           setStatus('connected', '已連線監看');
         },

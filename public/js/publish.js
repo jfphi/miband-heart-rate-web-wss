@@ -1,4 +1,5 @@
 import { MiBandBle } from './ble.js';
+import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
 import { createTransport, getConfiguredBackend } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
@@ -14,6 +15,7 @@ const el = {
   bpm: document.getElementById('bpm'),
   contact: document.getElementById('contact'),
   rosterMeta: document.getElementById('rosterMeta'),
+  hrChart: document.getElementById('hrChart'),
   error: document.getElementById('error'),
   connectBle: document.getElementById('connectBle'),
   disconnectBle: document.getElementById('disconnectBle'),
@@ -21,6 +23,9 @@ const el = {
 };
 
 el.roomCode.textContent = room || '------';
+
+/** @type {{ t: number, bpm: number }[]} */
+let hrHistory = [];
 
 function setStatus(node, kind, text) {
   node.className = `status ${kind}`;
@@ -32,6 +37,12 @@ function showError(msg) {
   el.error.textContent = msg || '';
 }
 
+function renderChart() {
+  const now = Date.now();
+  hrHistory = pruneHrHistory(hrHistory, now);
+  el.hrChart.innerHTML = renderHrSparkline(hrHistory, { width: 640, height: 64, now });
+}
+
 if (!room) {
   showError('缺少房間碼，請從首頁建立房間');
   el.connectBle.disabled = true;
@@ -41,6 +52,9 @@ let transport = null;
 const clientId = getOrCreateClientId();
 let lastBpm = null;
 
+renderChart();
+setInterval(renderChart, 1000);
+
 const ble = new MiBandBle({
   onHeartRate: async ({ bpm, contact }) => {
     if (bpm !== lastBpm) {
@@ -49,6 +63,8 @@ const ble = new MiBandBle({
       void el.bpm.offsetWidth;
       el.bpm.classList.add('pulse');
       lastBpm = bpm;
+      hrHistory = pushHrSample(hrHistory, bpm);
+      renderChart();
     }
     el.contact.textContent =
       contact === null || contact === undefined

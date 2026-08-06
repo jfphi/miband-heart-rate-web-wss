@@ -253,6 +253,42 @@ button.active {
   color: var(--muted);
 }
 
+.hr-chart-wrap {
+  margin-top: 10px;
+}
+
+.hr-chart-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.hr-chart {
+  display: block;
+  width: 100%;
+  height: 56px;
+  overflow: visible;
+}
+
+.hr-chart-line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.hr-chart-baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.card .hr-chart {
+  height: 48px;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
