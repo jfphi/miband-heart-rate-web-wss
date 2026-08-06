@@ -102,12 +102,20 @@ export function createHrThrottle(
     return emit({ force: false, ts });
   }
 
-  publish.startKeepalive = (canSend) => {
+  /**
+   * @param {() => boolean} [canSend]
+   * @param {(err: unknown) => void} [onError] called for non-transient emit failures
+   */
+  publish.startKeepalive = (canSend, onError) => {
     canSendFn = typeof canSend === 'function' ? canSend : () => true;
     if (keepaliveTimer != null) return;
     const interval = Math.max(500, Math.min(minIntervalMs, maxSilenceMs));
     keepaliveTimer = setInterval(() => {
-      void emit({ force: false }).catch(() => {});
+      void emit({ force: false }).catch((err) => {
+        // Transient failures return false from emit; only real errors land here.
+        onError?.(err);
+        publish.stopKeepalive();
+      });
     }, interval);
   };
 

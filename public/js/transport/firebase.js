@@ -124,7 +124,10 @@ export function createFirebaseTransport(cfg) {
         );
 
         if (role === 'publisher') {
-          sendHr.startKeepalive(() => Boolean(selfRef));
+          sendHr.startKeepalive(
+            () => Boolean(selfRef),
+            (err) => onError?.(err?.message || String(err)),
+          );
         }
         onStatus?.('connected', '房間已連線');
       } catch (err) {

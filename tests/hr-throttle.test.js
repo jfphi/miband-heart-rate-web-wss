@@ -151,4 +151,37 @@ describe('createHrThrottle', () => {
     assert.equal(sent[0].bpm, 55);
     publish.stopKeepalive();
   });
+
+  it('keepalive surfaces non-transient errors and stops', async () => {
+    // Mock only setInterval so Date.now() stays real (silence window already elapsed).
+    mock.timers.enable({ apis: ['setInterval'] });
+    try {
+      const errors = [];
+      let fail = false;
+      const publish = createHrThrottle(
+        async () => {
+          if (fail) throw new Error('PERMISSION_DENIED');
+        },
+        { minIntervalMs: 1000, maxSilenceMs: 4000 },
+      );
+
+      assert.equal(await publish({ bpm: 66, contact: true, ts: 0 }), true);
+      fail = true;
+      publish.startKeepalive(
+        () => true,
+        (err) => errors.push(String(err?.message || err)),
+      );
+      mock.timers.tick(1000);
+      await Promise.resolve();
+      await Promise.resolve();
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /PERMISSION_DENIED/);
+      // Further ticks must not spam after stopKeepalive.
+      mock.timers.tick(5000);
+      await Promise.resolve();
+      assert.equal(errors.length, 1);
+    } finally {
+      mock.timers.reset();
+    }
+  });
 });

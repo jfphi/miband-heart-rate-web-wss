@@ -307,6 +307,7 @@ export function createWssTransport(cfg) {
       if (role === 'publisher') {
         sendHr.startKeepalive(
           () => Boolean(ws) && ws.readyState === WebSocket.OPEN,
+          (err) => onError?.(err?.message || String(err)),
         );
       }
 
