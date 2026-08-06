@@ -1,4 +1,8 @@
-import { createHrThrottle, generateRoomCode } from '../util.js';
+import {
+  createHrThrottle,
+  generateRoomCode,
+  reconnectDelayMs,
+} from '../util.js';
 
 function resolveWsUrl(cfg) {
   if (cfg?.wsUrl) return cfg.wsUrl;
@@ -38,7 +42,10 @@ export function createWssTransport(cfg) {
   let sessionGen = 0;
 
   const sendHr = createHrThrottle(async ({ bpm, contact, ts }) => {
-    send({ type: 'hr', bpm, contact, ts });
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket 尚未連線');
+    }
+    ws.send(JSON.stringify({ type: 'hr', bpm, contact, ts }));
   });
 
   function clearReconnect() {
@@ -166,7 +173,7 @@ export function createWssTransport(cfg) {
   function scheduleReconnect(gen) {
     if (!isSession(gen) || !roomCode || !clientId) return;
     clearReconnect();
-    const delay = Math.min(1000 * 2 ** reconnectAttempt, 15000);
+    const delay = reconnectDelayMs(reconnectAttempt);
     reconnectAttempt += 1;
     onStatus?.('reconnecting', '連線中斷，重連中…');
 
@@ -185,8 +192,7 @@ export function createWssTransport(cfg) {
         sendJoin();
         reconnectAttempt = 0;
       } catch {
-        // Reschedule only via socket `close` to avoid double backoff.
-        // WebSocket constructor sync failures are ignored (same-origin URL).
+        // Async socket failures reschedule via `close` only.
       }
     }, delay);
   }
@@ -197,9 +203,21 @@ export function createWssTransport(cfg) {
     }
 
     const url = resolveWsUrl(cfg);
+    let socket;
+    try {
+      socket = new WebSocket(url);
+    } catch (err) {
+      // Constructor sync throw never emits close — schedule once here.
+      if (isSession(gen)) {
+        queueMicrotask(() => {
+          if (isSession(gen) && !ws) scheduleReconnect(gen);
+        });
+      }
+      return Promise.reject(err);
+    }
+
+    ws = socket;
     openPromise = new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
-      ws = socket;
       let settled = false;
 
       socket.addEventListener('open', () => {
@@ -293,20 +311,37 @@ export function createWssTransport(cfg) {
       }
 
       onStatus?.('connecting', '加入房間中…');
-      await connect(gen);
+      try {
+        await connect(gen);
+      } catch (err) {
+        if (!isSession(gen)) {
+          closeSocket(ws);
+          ws = null;
+          throw new Error('連線已取消');
+        }
+        // Background reconnect is armed (close or constructor path).
+        onStatus?.('reconnecting', '連線中斷，重連中…');
+        return { roomCode, clientId };
+      }
+
       if (!isSession(gen)) {
         closeSocket(ws);
         ws = null;
         throw new Error('連線已取消');
       }
-      sendJoin();
+      try {
+        sendJoin();
+      } catch {
+        if (!isSession(gen)) throw new Error('連線已取消');
+        onStatus?.('reconnecting', '連線中斷，重連中…');
+        return { roomCode, clientId };
+      }
 
       return { roomCode, clientId };
     },
 
     async publishHr(payload) {
       if (role !== 'publisher') return false;
-      // Always feed throttle (updates latest); send only when socket is open via canSend
       return sendHr(payload);
     },
 

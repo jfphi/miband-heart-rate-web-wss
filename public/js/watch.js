@@ -122,7 +122,9 @@ async function init() {
                 ? '連線中斷，重連中…'
                 : text;
           setStatus(kind === 'reconnecting' ? 'connecting' : kind, label);
-          if (kind === 'connected') showError('');
+          if (kind === 'connected' || kind === 'reconnecting' || kind === 'connecting') {
+            showError('');
+          }
         },
         onError: (msg) => {
           showError(msg);
@@ -131,6 +133,7 @@ async function init() {
       });
     })
     .catch((err) => {
+      // Hard failures only; WSS transient connect keeps reconnecting.
       showError(err.message || String(err));
       setStatus('error', '無法加入房間');
     });

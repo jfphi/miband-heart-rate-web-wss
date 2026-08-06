@@ -44,9 +44,12 @@ export function createFirebaseTransport(cfg) {
   let unsubscribe = null;
   let selfRef = null;
   let onRoster = null;
+  let onStatus = null;
 
   const sendHr = createHrThrottle(async ({ bpm, contact, ts }) => {
-    if (!selfRef || role !== 'publisher') return;
+    if (!selfRef || role !== 'publisher') {
+      throw new Error('Firebase 尚未就緒');
+    }
     await update(selfRef, {
       bpm,
       contact,
@@ -82,12 +85,14 @@ export function createFirebaseTransport(cfg) {
       clientId: id,
       onRoster: rosterCb,
       onError,
+      onStatus: statusCb,
     }) {
       roomCode = String(code || '').toUpperCase();
       role = joinRole;
       name = joinName || '匿名';
       clientId = id;
       onRoster = rosterCb;
+      onStatus = statusCb;
 
       if (!roomCode) throw new Error('缺少房間碼');
 
@@ -103,6 +108,7 @@ export function createFirebaseTransport(cfg) {
         updatedAt: Date.now(),
       };
 
+      onStatus?.('connecting', '加入房間中…');
       try {
         await set(selfRef, profile);
         await onDisconnect(selfRef).update({
@@ -120,7 +126,9 @@ export function createFirebaseTransport(cfg) {
         if (role === 'publisher') {
           sendHr.startKeepalive(() => Boolean(selfRef));
         }
+        onStatus?.('connected', '房間已連線');
       } catch (err) {
+        onStatus?.('error', '無法加入房間');
         onError?.(err.message || String(err));
         throw err;
       }

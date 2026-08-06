@@ -139,7 +139,9 @@ async function init() {
       onStatus: (kind, text) => {
         const statusKind = kind === 'reconnecting' ? 'connecting' : kind;
         setStatus(el.roomStatus, statusKind, text);
-        if (kind === 'connected') showError('');
+        if (kind === 'connected' || kind === 'reconnecting' || kind === 'connecting') {
+          showError('');
+        }
       },
       onError: (msg) => {
         showError(msg);
@@ -147,6 +149,8 @@ async function init() {
       },
     });
   } catch (err) {
+    // Hard failures only (cancelled / missing room). Transient WSS
+    // connect failures resolve and keep reconnecting via onStatus.
     showError(err.message || String(err));
     setStatus(el.roomStatus, 'error', '無法加入房間');
   }

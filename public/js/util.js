@@ -33,12 +33,19 @@ export function buildPageUrl(page, params) {
   return url.pathname.split('/').pop() + url.search;
 }
 
+/** Exponential backoff delay for WSS reconnect (ms), capped at 15s. */
+export function reconnectDelayMs(attempt, { baseMs = 1000, maxMs = 15000 } = {}) {
+  const n = Math.max(0, Number(attempt) || 0);
+  return Math.min(baseMs * 2 ** n, maxMs);
+}
+
 /**
  * Throttle HR publishes:
  * - bpm 變化：最多約 1Hz（minIntervalMs）
  * - bpm 不變：定期 heartbeat（maxSilenceMs）
  * - 內建 timer keepalive，不依賴 BLE 通知頻率
  * - flush()：重連後強制重送最後一筆
+ * - sendFn 失敗不推進 lastSentAt，可自動重試
  */
 export function createHrThrottle(
   sendFn,
@@ -46,7 +53,8 @@ export function createHrThrottle(
 ) {
   let latest = null;
   let lastSentBpm = null;
-  let lastSentAt = 0;
+  /** @type {number | null} */
+  let lastSentAt = null;
   let keepaliveTimer = null;
   let canSendFn = () => true;
 
@@ -58,8 +66,8 @@ export function createHrThrottle(
     if (!force) {
       const sameBpm = latest.bpm === lastSentBpm;
       if (sameBpm) {
-        if (lastSentAt && now - lastSentAt < maxSilenceMs) return false;
-      } else if (lastSentAt && now - lastSentAt < minIntervalMs) {
+        if (lastSentAt != null && now - lastSentAt < maxSilenceMs) return false;
+      } else if (lastSentAt != null && now - lastSentAt < minIntervalMs) {
         return false;
       }
     }
@@ -69,7 +77,21 @@ export function createHrThrottle(
       contact: latest.contact,
       ts: now,
     };
-    await sendFn(payload);
+    try {
+      await sendFn(payload);
+    } catch (err) {
+      // Swallow only transient transport gaps so BLE path does not flash errors.
+      const msg = String(err?.message || err);
+      if (
+        msg.includes('尚未連線') ||
+        msg.includes('尚未就緒') ||
+        msg.includes('NETWORK_ERROR') ||
+        msg.includes('network')
+      ) {
+        return false;
+      }
+      throw err;
+    }
     lastSentBpm = latest.bpm;
     lastSentAt = now;
     return true;
