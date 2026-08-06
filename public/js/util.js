@@ -33,19 +33,72 @@ export function buildPageUrl(page, params) {
   return url.pathname.split('/').pop() + url.search;
 }
 
-export function createHrThrottle(sendFn, { minIntervalMs = 1000 } = {}) {
-  let lastBpm = null;
+/**
+ * Throttle HR publishes:
+ * - bpm 變化：最多約 1Hz（minIntervalMs）
+ * - bpm 不變：定期 heartbeat（maxSilenceMs）
+ * - 內建 timer keepalive，不依賴 BLE 通知頻率
+ * - flush()：重連後強制重送最後一筆
+ */
+export function createHrThrottle(
+  sendFn,
+  { minIntervalMs = 1000, maxSilenceMs = 4000 } = {},
+) {
+  let latest = null;
+  let lastSentBpm = null;
   let lastSentAt = 0;
+  let keepaliveTimer = null;
+  let canSendFn = () => true;
 
-  return async ({ bpm, contact, ts }) => {
+  async function emit({ force = false, ts } = {}) {
+    if (!latest) return false;
+    if (!canSendFn()) return false;
+
     const now = ts ?? Date.now();
-    if (bpm === lastBpm) return false;
-    if (now - lastSentAt < minIntervalMs) return false;
-    lastBpm = bpm;
+    if (!force) {
+      const sameBpm = latest.bpm === lastSentBpm;
+      if (sameBpm) {
+        if (lastSentAt && now - lastSentAt < maxSilenceMs) return false;
+      } else if (lastSentAt && now - lastSentAt < minIntervalMs) {
+        return false;
+      }
+    }
+
+    const payload = {
+      bpm: latest.bpm,
+      contact: latest.contact,
+      ts: now,
+    };
+    await sendFn(payload);
+    lastSentBpm = latest.bpm;
     lastSentAt = now;
-    await sendFn({ bpm, contact: Boolean(contact), ts: now });
     return true;
+  }
+
+  async function publish({ bpm, contact, ts }) {
+    latest = { bpm, contact: Boolean(contact) };
+    return emit({ force: false, ts });
+  }
+
+  publish.startKeepalive = (canSend) => {
+    canSendFn = typeof canSend === 'function' ? canSend : () => true;
+    if (keepaliveTimer != null) return;
+    const interval = Math.max(500, Math.min(minIntervalMs, maxSilenceMs));
+    keepaliveTimer = setInterval(() => {
+      void emit({ force: false }).catch(() => {});
+    }, interval);
   };
+
+  publish.stopKeepalive = () => {
+    if (keepaliveTimer != null) {
+      clearInterval(keepaliveTimer);
+      keepaliveTimer = null;
+    }
+  };
+
+  publish.flush = () => emit({ force: true });
+
+  return publish;
 }
 
 export function formatAge(updatedAt) {

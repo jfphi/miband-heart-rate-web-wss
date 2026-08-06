@@ -116,6 +116,10 @@ export function createFirebaseTransport(cfg) {
           (snap) => emitRoster(snap.val()),
           (err) => onError?.(err.message || String(err)),
         );
+
+        if (role === 'publisher') {
+          sendHr.startKeepalive(() => Boolean(selfRef));
+        }
       } catch (err) {
         onError?.(err.message || String(err));
         throw err;
@@ -125,10 +129,12 @@ export function createFirebaseTransport(cfg) {
     },
 
     async publishHr(payload) {
+      if (role !== 'publisher') return false;
       return sendHr(payload);
     },
 
     async leaveRoom() {
+      sendHr.stopKeepalive();
       if (unsubscribe) {
         unsubscribe();
         unsubscribe = null;

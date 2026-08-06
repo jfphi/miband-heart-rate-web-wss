@@ -113,7 +113,16 @@ async function init() {
           members = list;
           syncHistory(list);
           render();
-          setStatus('connected', '已連線監看');
+        },
+        onStatus: (kind, text) => {
+          const label =
+            kind === 'connected'
+              ? '已連線監看'
+              : kind === 'reconnecting'
+                ? '連線中斷，重連中…'
+                : text;
+          setStatus(kind === 'reconnecting' ? 'connecting' : kind, label);
+          if (kind === 'connected') showError('');
         },
         onError: (msg) => {
           showError(msg);
@@ -121,7 +130,6 @@ async function init() {
         },
       });
     })
-    .then(() => setStatus('connected', '已連線監看'))
     .catch((err) => {
       showError(err.message || String(err));
       setStatus('error', '無法加入房間');

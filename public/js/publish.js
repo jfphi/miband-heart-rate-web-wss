@@ -136,12 +136,16 @@ async function init() {
         const publishers = members.filter((m) => m.role === 'publisher').length;
         el.rosterMeta.textContent = `房間人數：${online}（發布者 ${publishers}）`;
       },
+      onStatus: (kind, text) => {
+        const statusKind = kind === 'reconnecting' ? 'connecting' : kind;
+        setStatus(el.roomStatus, statusKind, text);
+        if (kind === 'connected') showError('');
+      },
       onError: (msg) => {
         showError(msg);
         setStatus(el.roomStatus, 'error', '房間連線錯誤');
       },
     });
-    setStatus(el.roomStatus, 'connected', '房間已連線');
   } catch (err) {
     showError(err.message || String(err));
     setStatus(el.roomStatus, 'error', '無法加入房間');

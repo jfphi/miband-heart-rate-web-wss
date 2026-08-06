@@ -6,6 +6,20 @@ function resolveWsUrl(cfg) {
   return `${proto}://${location.host}/ws`;
 }
 
+function closeSocket(socket) {
+  if (!socket) return;
+  try {
+    if (
+      socket.readyState === WebSocket.OPEN ||
+      socket.readyState === WebSocket.CONNECTING
+    ) {
+      socket.close();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function createWssTransport(cfg) {
   let ws = null;
   let roomCode = null;
@@ -14,12 +28,29 @@ export function createWssTransport(cfg) {
   let name = null;
   let onRoster = null;
   let onError = null;
+  let onStatus = null;
   let members = new Map();
   let openPromise = null;
+  let shouldReconnect = false;
+  let reconnectTimer = null;
+  let reconnectAttempt = 0;
+  /** Bumped on leave / new join to cancel in-flight reconnect work. */
+  let sessionGen = 0;
 
   const sendHr = createHrThrottle(async ({ bpm, contact, ts }) => {
     send({ type: 'hr', bpm, contact, ts });
   });
+
+  function clearReconnect() {
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  }
+
+  function isSession(gen) {
+    return gen === sessionGen && shouldReconnect;
+  }
 
   function send(msg) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -28,9 +59,28 @@ export function createWssTransport(cfg) {
     ws.send(JSON.stringify(msg));
   }
 
+  function sendJoin() {
+    send({
+      type: 'join',
+      room: roomCode,
+      role,
+      name,
+      clientId,
+    });
+  }
+
   function emitRoster() {
     if (!onRoster) return;
     onRoster(Array.from(members.values()));
+  }
+
+  function markSelfOffline() {
+    if (!clientId) return;
+    const self = members.get(clientId);
+    if (self) {
+      members.set(clientId, { ...self, online: false, updatedAt: Date.now() });
+      emitRoster();
+    }
   }
 
   function upsertMember(partial) {
@@ -71,6 +121,10 @@ export function createWssTransport(cfg) {
           });
         });
         emitRoster();
+        onStatus?.('connected', '房間已連線');
+        if (role === 'publisher') {
+          void sendHr.flush().catch(() => {});
+        }
         break;
       }
       case 'roster': {
@@ -109,28 +163,82 @@ export function createWssTransport(cfg) {
     }
   }
 
-  function connect() {
+  function scheduleReconnect(gen) {
+    if (!isSession(gen) || !roomCode || !clientId) return;
+    clearReconnect();
+    const delay = Math.min(1000 * 2 ** reconnectAttempt, 15000);
+    reconnectAttempt += 1;
+    onStatus?.('reconnecting', '連線中斷，重連中…');
+
+    reconnectTimer = setTimeout(async () => {
+      if (!isSession(gen) || !roomCode || !clientId) return;
+      try {
+        if (ws && ws.readyState === WebSocket.CLOSED) ws = null;
+        openPromise = null;
+        await connect(gen);
+        if (!isSession(gen)) {
+          closeSocket(ws);
+          ws = null;
+          openPromise = null;
+          return;
+        }
+        sendJoin();
+        reconnectAttempt = 0;
+      } catch {
+        // Reschedule only via socket `close` to avoid double backoff.
+        // WebSocket constructor sync failures are ignored (same-origin URL).
+      }
+    }, delay);
+  }
+
+  function connect(gen) {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return openPromise || Promise.resolve();
     }
 
+    const url = resolveWsUrl(cfg);
     openPromise = new Promise((resolve, reject) => {
-      const url = resolveWsUrl(cfg);
-      ws = new WebSocket(url);
+      const socket = new WebSocket(url);
+      ws = socket;
+      let settled = false;
 
-      ws.addEventListener('open', () => resolve());
-      ws.addEventListener('message', (ev) => handleMessage(ev.data));
-      ws.addEventListener('error', () => {
-        onError?.(`無法連線到 ${url}`);
-        reject(new Error(`無法連線到 ${url}`));
+      socket.addEventListener('open', () => {
+        if (!isSession(gen)) {
+          settled = true;
+          closeSocket(socket);
+          reject(new Error('連線已取消'));
+          return;
+        }
+        settled = true;
+        resolve();
       });
-      ws.addEventListener('close', () => {
-        if (clientId) {
-          const self = members.get(clientId);
-          if (self) {
-            members.set(clientId, { ...self, online: false, updatedAt: Date.now() });
-            emitRoster();
-          }
+      socket.addEventListener('message', (ev) => {
+        if (ws !== socket || gen !== sessionGen) return;
+        handleMessage(ev.data);
+      });
+      socket.addEventListener('error', () => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`無法連線到 ${url}`));
+        }
+        if (isSession(gen)) {
+          onStatus?.('reconnecting', '連線中斷，重連中…');
+        }
+      });
+      socket.addEventListener('close', () => {
+        if (ws === socket) {
+          ws = null;
+          openPromise = null;
+        }
+        if (gen === sessionGen) {
+          markSelfOffline();
+        }
+        if (!settled) {
+          settled = true;
+          reject(new Error(`無法連線到 ${url}`));
+        }
+        if (isSession(gen)) {
+          scheduleReconnect(gen);
         }
       });
     });
@@ -152,46 +260,78 @@ export function createWssTransport(cfg) {
       clientId: id,
       onRoster: rosterCb,
       onError: errorCb,
+      onStatus: statusCb,
     }) {
+      // Invalidate any prior session / in-flight reconnect before starting fresh.
+      shouldReconnect = false;
+      clearReconnect();
+      sendHr.stopKeepalive();
+      closeSocket(ws);
+      ws = null;
+      openPromise = null;
+
+      sessionGen += 1;
+      const gen = sessionGen;
+
       roomCode = String(code || '').toUpperCase();
       role = joinRole;
       name = joinName || '匿名';
       clientId = id;
       onRoster = rosterCb;
       onError = errorCb;
+      onStatus = statusCb;
+      shouldReconnect = true;
+      reconnectAttempt = 0;
+      members.clear();
 
       if (!roomCode) throw new Error('缺少房間碼');
 
-      await connect();
-      send({
-        type: 'join',
-        room: roomCode,
-        role,
-        name,
-        clientId,
-      });
+      if (role === 'publisher') {
+        sendHr.startKeepalive(
+          () => Boolean(ws) && ws.readyState === WebSocket.OPEN,
+        );
+      }
+
+      onStatus?.('connecting', '加入房間中…');
+      await connect(gen);
+      if (!isSession(gen)) {
+        closeSocket(ws);
+        ws = null;
+        throw new Error('連線已取消');
+      }
+      sendJoin();
 
       return { roomCode, clientId };
     },
 
     async publishHr(payload) {
       if (role !== 'publisher') return false;
+      // Always feed throttle (updates latest); send only when socket is open via canSend
       return sendHr(payload);
     },
 
     async leaveRoom() {
+      shouldReconnect = false;
+      sessionGen += 1;
+      clearReconnect();
+      sendHr.stopKeepalive();
+
+      const socket = ws;
       try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          send({ type: 'leave' });
-          ws.close();
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'leave' }));
         }
       } catch {
         /* ignore */
       }
+      closeSocket(socket);
+
       ws = null;
       openPromise = null;
       members.clear();
       roomCode = null;
+      clientId = null;
+      reconnectAttempt = 0;
     },
 
     getShareUrl({ roomCode: code, role: shareRole = 'viewer' }) {
