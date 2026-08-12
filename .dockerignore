@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+.env
+.env.local
+public/js/config.generated.js
+public/js/config.local.js
+tests
+.codegraph
+.cursor
+*.egg-info
+dist

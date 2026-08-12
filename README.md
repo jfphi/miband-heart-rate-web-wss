@@ -94,10 +94,45 @@ Pages 設定：
 
 若前端在 Pages、WSS 在遠端 API：`MIBAND_BACKEND=fastapi_wss` 且 `MIBAND_WS_URL=wss://your-api.example.com/ws`。
 
+## Render 部署（FastAPI WSS，不連 GitHub）
+
+單一 Web Service 同時提供靜態頁與 `/ws`。前端會用目前網站同源的 `wss://…/ws`，**不必設 `MIBAND_WS_URL`**。
+
+Render 的 Python 原生建置一定要連 Git。此專案保持 **GitHub private、不授權 Render GitHub App**：本機建 Docker 映像，推到 Docker Hub，Render 只拉映像。
+
+1. 安裝 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，並註冊 [Docker Hub](https://hub.docker.com/)（映像可設為 **private**）。
+2. 在專案根目錄建置並推送（把 `YOUR_DOCKERHUB_USER` 換成你的帳號）：
+
+```bash
+docker login
+docker build --platform=linux/amd64 -t YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest .
+docker push YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest
+```
+
+3. 在 [Render Dashboard](https://dashboard.render.com) 註冊（**不要** Connect GitHub）。
+4. **New → Web Service** → 選 **Existing Image**，映像 URL：
+
+   `docker.io/YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest`
+
+   若 Docker Hub 映像是 private：先在 Workspace Settings 加 Container Registry Credential，建立服務時選該憑證。
+5. Instance **Free**、Region **Singapore**、Health Check `/api/health`、環境變數 `MIBAND_BACKEND=fastapi_wss`。
+6. 部署完成後網址形如 `https://xxx.onrender.com`。發布端請用 **Chrome / Edge**（Web Bluetooth 需要 HTTPS，Render 已提供）。
+7. 驗證：`/api/health` 應回 `{ "status": "ok" }`，再建立房間並確認監看端能收到心率。
+
+之後改程式：本機再 `docker build` / `docker push`，到 Render 該服務按 **Manual Deploy → Deploy latest reference**。
+
+### 免費方案限制
+
+- 約 15 分鐘無 HTTP / WSS 流量會休眠；下次連線約等 1 分鐘。發布中前端約每 4 秒 heartbeat，使用中通常不會睡。
+- 休眠或重啟會清空記憶體裡的房間狀態（本專案沒有資料庫）。
+- 每月約 750 免費時數；一台服務若幾乎一直醒著，剛好夠一個月。
+- 平台可能隨時重啟免費實例。
+
 ## 專案結構
 
 ```
 .env / .env.example     # 後端模式與 Firebase 設定
+render.yaml             # Render Blueprint
 public/                 # 前端
 server/                 # FastAPI + WebSocket + /api/config
 scripts/generate_config.py
