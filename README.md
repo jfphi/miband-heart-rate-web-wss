@@ -94,32 +94,41 @@ Pages 設定：
 
 若前端在 Pages、WSS 在遠端 API：`MIBAND_BACKEND=fastapi_wss` 且 `MIBAND_WS_URL=wss://your-api.example.com/ws`。
 
-## Render 部署（FastAPI WSS，不連 GitHub）
+## Render 部署（FastAPI WSS）
 
 單一 Web Service 同時提供靜態頁與 `/ws`。前端會用目前網站同源的 `wss://…/ws`，**不必設 `MIBAND_WS_URL`**。
 
-Render 的 Python 原生建置一定要連 Git。此專案保持 **GitHub private、不授權 Render GitHub App**：本機建 Docker 映像，推到 Docker Hub，Render 只拉映像。
+Repo 已是 public。兩種做法擇一即可，**都不必**自己建 Docker 映像。
 
-1. 安裝 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，並註冊 [Docker Hub](https://hub.docker.com/)（映像可設為 **private**）。
-2. 在專案根目錄建置並推送（把 `YOUR_DOCKERHUB_USER` 換成你的帳號）：
+### 方法 A：Blueprint（讀 `render.yaml`）
 
-```bash
-docker login
-docker build --platform=linux/amd64 -t YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest .
-docker push YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest
-```
+1. 先確認 GitHub 上的 [`render.yaml`](render.yaml) 是 `runtime: python`（不是 Docker image）。
+2. [Render Dashboard](https://dashboard.render.com) → **New → Blueprint**，選此 repo、Branch `master`、Path `render.yaml`。
+3. 預覽應出現 Python Web Service，再套用。
 
-3. 在 [Render Dashboard](https://dashboard.render.com) 註冊（**不要** Connect GitHub）。
-4. **New → Web Service** → 選 **Existing Image**，映像 URL：
+### 方法 B：Public Git Repository（手動填表）
 
-   `docker.io/YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest`
+1. [Render Dashboard](https://dashboard.render.com) → **New → Web Service**。
+2. 選 **Public Git Repository**，貼上：
 
-   若 Docker Hub 映像是 private：先在 Workspace Settings 加 Container Registry Credential，建立服務時選該憑證。
-5. Instance **Free**、Region **Singapore**、Health Check `/api/health`、環境變數 `MIBAND_BACKEND=fastapi_wss`。
-6. 部署完成後網址形如 `https://xxx.onrender.com`。發布端請用 **Chrome / Edge**（Web Bluetooth 需要 HTTPS，Render 已提供）。
-7. 驗證：`/api/health` 應回 `{ "status": "ok" }`，再建立房間並確認監看端能收到心率。
+   `https://github.com/jfphi/miband-heart-rate-web-wss`
 
-之後改程式：本機再 `docker build` / `docker push`，到 Render 該服務按 **Manual Deploy → Deploy latest reference**。
+3. Branch：`master`。其餘：
+
+   - Runtime：Python
+   - Build command：`uv sync --frozen --no-dev`
+   - Start command：`uv run python main.py`
+   - Instance：Free
+   - Region：Singapore
+   - Health Check Path：`/api/health`
+   - 環境變數：`PYTHON_VERSION=3.12`、`MIBAND_BACKEND=fastapi_wss`
+
+4. 部署完成後網址形如 `https://xxx.onrender.com`。發布端請用 **Chrome / Edge**（Web Bluetooth 需要 HTTPS，Render 已提供）。
+5. 驗證：`/api/health` 應回 `{ "status": "ok" }`，再建立房間並確認監看端能收到心率。
+
+方法 B **沒有 Auto-Deploy**（push 後要按 Manual Deploy）。方法 A（Blueprint）在 GitHub 已連上時，之後改 `render.yaml` 會自動同步。
+
+若之後把 repo 改回 private，方法 B 會失敗；方法 A 仍需要 GitHub 授權。
 
 ### 免費方案限制
 
@@ -132,8 +141,7 @@ docker push YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest
 
 ```
 .env / .env.example     # 後端模式與 Firebase 設定
-Dockerfile              # 本機建映像給 Render（不連 GitHub）
-render.yaml             # Dashboard 對照（不要用 Blueprint）
+render.yaml             # Render Blueprint
 public/                 # 前端
 server/                 # FastAPI + WebSocket + /api/config
 scripts/generate_config.py

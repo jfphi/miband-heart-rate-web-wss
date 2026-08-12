@@ -1,14 +1,15 @@
-# 僅作 Dashboard 對照，不必用 Blueprint（Blueprint 會連 Git）。
-# 不連 GitHub：本機建映像 → 推 Docker Hub → Render 選 Existing Image。
+# Render Blueprint（New → Blueprint 會讀這個檔）
 services:
   - type: web
     name: miband-heart-rate-web-wss
-    runtime: image
+    runtime: python
     plan: free
     region: singapore
-    image:
-      url: docker.io/YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run python main.py
     healthCheckPath: /api/health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
       - key: MIBAND_BACKEND
         value: fastapi_wss
