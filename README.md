@@ -132,7 +132,8 @@ docker push YOUR_DOCKERHUB_USER/miband-heart-rate-web-wss:latest
 
 ```
 .env / .env.example     # 後端模式與 Firebase 設定
-render.yaml             # Render Blueprint
+Dockerfile              # 本機建映像給 Render（不連 GitHub）
+render.yaml             # Dashboard 對照（不要用 Blueprint）
 public/                 # 前端
 server/                 # FastAPI + WebSocket + /api/config
 scripts/generate_config.py
