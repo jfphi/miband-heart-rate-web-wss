@@ -148,6 +148,10 @@ export function createFirebaseTransport(cfg) {
       sendHr.pause();
     },
 
+    resumeHr() {
+      sendHr.resume();
+    },
+
     async leaveRoom() {
       sendHr.stopKeepalive();
       if (unsubscribe) {

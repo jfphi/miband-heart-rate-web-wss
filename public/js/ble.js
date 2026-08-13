@@ -47,6 +47,10 @@ export class MiBandBle {
     };
   }
 
+  get isConnected() {
+    return Boolean(this.shouldReconnect && this.server?.connected);
+  }
+
   async connect() {
     if (!isWebBluetoothSupported()) {
       throw new Error('此瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge');
@@ -83,6 +87,7 @@ export class MiBandBle {
 
     this.characteristic = characteristic;
     this.handler = (event) => {
+      if (!this.isConnected) return;
       try {
         const parsed = parseHeartRate(event.target.value);
         this.onHeartRate?.(parsed);
@@ -91,9 +96,9 @@ export class MiBandBle {
       }
     };
 
+    this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
     this.characteristic.addEventListener('characteristicvaluechanged', this.handler);
     await this.characteristic.startNotifications();
-    this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
   }
 
   scheduleReconnect() {

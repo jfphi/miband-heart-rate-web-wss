@@ -39,13 +39,26 @@ export function reconnectDelayMs(attempt, { baseMs = 1000, maxMs = 15000 } = {})
   return Math.min(baseMs * 2 ** n, maxMs);
 }
 
+export const WS_PING_INTERVAL_MS = 15000;
+export const WS_PONG_TIMEOUT_MS = 45000;
+
+/** True when an open socket has gone too long without a pong. */
+export function pongTimedOut(
+  lastPongAt,
+  now = Date.now(),
+  timeoutMs = WS_PONG_TIMEOUT_MS,
+) {
+  if (lastPongAt == null) return false;
+  return now - lastPongAt > timeoutMs;
+}
+
 /**
  * Throttle HR publishes:
  * - bpm 變化：最多約 1Hz（minIntervalMs）
  * - bpm 不變：定期 heartbeat（maxSilenceMs）
  * - 內建 timer keepalive，不依賴 BLE 通知頻率
  * - flush()：重連後強制重送最後一筆
- * - pause()：BLE 斷線時清掉 latest，避免心跳舊 bpm
+ * - pause()：BLE 斷線時停止送出；須 resume() 才會再送
  * - sendFn 失敗不推進 lastSentAt，可自動重試
  */
 export function createHrThrottle(
@@ -100,7 +113,7 @@ export function createHrThrottle(
   }
 
   async function publish({ bpm, contact, ts }) {
-    live = true;
+    if (!live) return false;
     latest = { bpm, contact: Boolean(contact) };
     return emit({ force: false, ts });
   }
@@ -131,12 +144,16 @@ export function createHrThrottle(
 
   publish.flush = () => emit({ force: true });
 
-  /** Stop heartbeats (e.g. BLE dropped). Next BLE sample re-arms via publish(). */
+  /** Stop heartbeats (e.g. BLE dropped). Call resume() after GATT is up again. */
   publish.pause = () => {
     live = false;
     latest = null;
     lastSentBpm = null;
     lastSentAt = null;
+  };
+
+  publish.resume = () => {
+    live = true;
   };
 
   return publish;

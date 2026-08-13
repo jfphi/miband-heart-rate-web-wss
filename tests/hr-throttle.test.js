@@ -3,8 +3,23 @@ import { describe, it, mock } from 'node:test';
 import {
   createHrThrottle,
   isStale,
+  pongTimedOut,
   reconnectDelayMs,
 } from '../public/js/util.js';
+
+describe('pongTimedOut', () => {
+  it('is false when no pong has been recorded', () => {
+    assert.equal(pongTimedOut(null, 50_000), false);
+  });
+
+  it('is false within the timeout window', () => {
+    assert.equal(pongTimedOut(1000, 1000 + 44_000), false);
+  });
+
+  it('is true after timeoutMs', () => {
+    assert.equal(pongTimedOut(1000, 1000 + 45_001), true);
+  });
+});
 
 describe('reconnectDelayMs', () => {
   it('grows exponentially and caps at maxMs', () => {
@@ -185,7 +200,7 @@ describe('createHrThrottle', () => {
     }
   });
 
-  it('pause stops keepalive and flush until the next BLE sample', async () => {
+  it('pause ignores samples until resume', async () => {
     mock.timers.enable({ apis: ['setInterval', 'Date'] });
     try {
       const sent = [];
@@ -200,7 +215,10 @@ describe('createHrThrottle', () => {
       mock.timers.tick(8000);
       assert.equal(sent.length, 1);
       assert.equal(await publish.flush(), false);
+      assert.equal(await publish({ bpm: 99, contact: true, ts: Date.now() }), false);
+      assert.equal(sent.length, 1);
 
+      publish.resume();
       assert.equal(await publish({ bpm: 88, contact: true, ts: Date.now() }), true);
       assert.equal(sent.length, 2);
       publish.stopKeepalive();

@@ -175,6 +175,65 @@ class RoomManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(pub.sent), 1)
         self.assertEqual(len(viewer.sent), 0)
 
+    async def test_old_socket_hr_is_stale(self) -> None:
+        mgr = RoomManager()
+        ws1 = DummyWS("old")
+        ws2 = DummyWS("new")
+        await mgr.join(
+            room_code="ABCD",
+            client_id="c1",
+            name="A",
+            role="publisher",
+            websocket=ws1,
+        )
+        await mgr.join(
+            room_code="ABCD",
+            client_id="c1",
+            name="A",
+            role="publisher",
+            websocket=ws2,
+        )
+        stale, _, member = await mgr.update_hr(
+            "ABCD", "c1", 80, True, None, websocket=ws1
+        )
+        self.assertEqual(stale, "stale")
+        self.assertIsNone(member)
+        ok, _, member = await mgr.update_hr(
+            "ABCD", "c1", 81, True, None, websocket=ws2
+        )
+        self.assertEqual(ok, "ok")
+        assert member is not None
+        self.assertEqual(member.bpm, 81)
+
+    async def test_reconnect_does_not_inherit_rate_limit(self) -> None:
+        mgr = RoomManager(hr_min_interval_ms=10_000)
+        ws1 = DummyWS("old")
+        ws2 = DummyWS("new")
+        await mgr.join(
+            room_code="ROOM",
+            client_id="p1",
+            name="P",
+            role="publisher",
+            websocket=ws1,
+        )
+        first, _, _ = await mgr.update_hr(
+            "ROOM", "p1", 70, True, None, websocket=ws1
+        )
+        self.assertEqual(first, "ok")
+        await mgr.join(
+            room_code="ROOM",
+            client_id="p1",
+            name="P",
+            role="publisher",
+            websocket=ws2,
+        )
+        flushed, _, member = await mgr.update_hr(
+            "ROOM", "p1", 70, True, None, websocket=ws2
+        )
+        self.assertEqual(flushed, "ok")
+        assert member is not None
+        self.assertEqual(member.bpm, 70)
+
 
 if __name__ == "__main__":
     unittest.main()

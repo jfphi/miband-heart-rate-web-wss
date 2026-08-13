@@ -80,7 +80,9 @@ const ble = new MiBandBle({
   },
   onStatus: (kind, text) => {
     setStatus(el.bleStatus, kind, text);
-    if (kind === 'disconnected' || kind === 'idle') {
+    if (kind === 'connected') {
+      transport?.resumeHr();
+    } else if (kind === 'disconnected' || kind === 'idle') {
       transport?.pauseHr();
     }
   },
@@ -153,6 +155,9 @@ async function init() {
         setStatus(el.roomStatus, 'error', '房間連線錯誤');
       },
     });
+    if (ble.isConnected) {
+      transport.resumeHr();
+    }
   } catch (err) {
     // Hard failures only (cancelled / missing room). Transient WSS
     // connect failures resolve and keep reconnecting via onStatus.

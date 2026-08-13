@@ -16,7 +16,7 @@ HR_MIN_INTERVAL_MS = 400
 TS_FUTURE_SLACK_MS = 2_000
 TS_PAST_SLACK_MS = 10_000
 
-HrStatus = Literal["ok", "drop", "forbidden", "missing"]
+HrStatus = Literal["ok", "drop", "forbidden", "missing", "stale"]
 
 
 class RoomFullError(Exception):
@@ -124,7 +124,7 @@ class RoomManager:
                 contact=previous.contact if previous else False,
                 online=True,
                 updated_at=int(time.time() * 1000),
-                last_hr_at=previous.last_hr_at if previous else None,
+                last_hr_at=None,
             )
             room.members[client_id] = member
 
@@ -175,7 +175,14 @@ class RoomManager:
         self._cleanup_tasks[task_key] = asyncio.create_task(_remove())
 
     async def update_hr(
-        self, room_code: str, client_id: str, bpm: int, contact: bool, ts: int | None
+        self,
+        room_code: str,
+        client_id: str,
+        bpm: int,
+        contact: bool,
+        ts: int | None,
+        *,
+        websocket: WebSocket | None = None,
     ) -> tuple[HrStatus, Room | None, Member | None]:
         code = room_code.strip().upper()
         async with self._lock:
@@ -185,6 +192,8 @@ class RoomManager:
             member = room.members.get(client_id)
             if not member or member.role != "publisher":
                 return "forbidden", room, None
+            if websocket is not None and member.websocket is not websocket:
+                return "stale", room, None
             now = int(time.time() * 1000)
             if (
                 member.last_hr_at is not None

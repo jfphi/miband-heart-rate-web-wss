@@ -1,7 +1,9 @@
 import {
   createHrThrottle,
   generateRoomCode,
+  pongTimedOut,
   reconnectDelayMs,
+  WS_PING_INTERVAL_MS,
 } from '../util.js';
 
 function resolveWsUrl(cfg) {
@@ -41,6 +43,8 @@ export function createWssTransport(cfg) {
   /** Bumped on leave / new join to cancel in-flight reconnect work. */
   let sessionGen = 0;
   let pingTimer = null;
+  /** @type {number | null} */
+  let lastPongAt = null;
 
   const sendHr = createHrThrottle(async ({ bpm, contact, ts }) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -66,14 +70,22 @@ export function createWssTransport(cfg) {
   function startPing() {
     if (pingTimer != null) return;
     pingTimer = setInterval(() => {
+      const socket = ws;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      if (pongTimedOut(lastPongAt)) {
+        closeSocket(socket);
+        return;
+      }
       try {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
-        }
+        socket.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
       } catch {
         /* ignore */
       }
-    }, 15000);
+    }, WS_PING_INTERVAL_MS);
+  }
+
+  function notePong() {
+    lastPongAt = Date.now();
   }
 
   function isSession(gen) {
@@ -184,6 +196,7 @@ export function createWssTransport(cfg) {
         break;
       }
       case 'pong':
+        notePong();
         break;
       case 'error':
         onError?.(msg.message || '伺服器錯誤');
@@ -251,6 +264,12 @@ export function createWssTransport(cfg) {
           return;
         }
         settled = true;
+        lastPongAt = Date.now();
+        try {
+          socket.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+        } catch {
+          /* ignore */
+        }
         resolve();
       });
       socket.addEventListener('message', (ev) => {
@@ -308,6 +327,7 @@ export function createWssTransport(cfg) {
       clearReconnect();
       sendHr.stopKeepalive();
       clearPing();
+      lastPongAt = null;
       closeSocket(ws);
       ws = null;
       openPromise = null;
@@ -375,12 +395,17 @@ export function createWssTransport(cfg) {
       sendHr.pause();
     },
 
+    resumeHr() {
+      sendHr.resume();
+    },
+
     async leaveRoom() {
       shouldReconnect = false;
       sessionGen += 1;
       clearReconnect();
       clearPing();
       sendHr.stopKeepalive();
+      lastPongAt = null;
 
       const socket = ws;
       try {

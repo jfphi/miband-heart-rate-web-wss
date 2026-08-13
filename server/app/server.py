@@ -84,6 +84,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             },
                             exclude=client_id,
                         )
+                    room_code = None
+                    client_id = None
 
                 try:
                     room, member, _prev = await rooms.join(
@@ -134,9 +136,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     ts_int = None
 
                 status, room, member = await rooms.update_hr(
-                    room_code, client_id, bpm, contact, ts_int
+                    room_code,
+                    client_id,
+                    bpm,
+                    contact,
+                    ts_int,
+                    websocket=websocket,
                 )
-                if status == "drop":
+                if status in {"drop", "stale"}:
                     continue
                 if status != "ok" or not room or not member:
                     await websocket.send_json(error_message("僅 publisher 可推送心率"))
