@@ -225,6 +225,3 @@ class RoomManager:
 
     def roster_snapshot(self, room: Room) -> list[dict[str, Any]]:
         return [member_public(m.to_dict()) for m in room.members.values()]
-
-
-rooms = RoomManager()

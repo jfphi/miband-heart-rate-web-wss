@@ -22,5 +22,5 @@ packages = ["server"]
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
+    "httpx2>=2.10.0",
 ]

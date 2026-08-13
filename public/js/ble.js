@@ -28,6 +28,15 @@ export function isWebBluetoothSupported() {
   return Boolean(navigator.bluetooth?.requestDevice);
 }
 
+/** Accept GATT HR once we are about to start notifications, not only after they succeed. */
+export function shouldAcceptHrNotification({
+  shouldReconnect,
+  gattConnected,
+  acceptingHr,
+}) {
+  return Boolean(shouldReconnect && gattConnected && acceptingHr);
+}
+
 export class MiBandBle {
   constructor({ onHeartRate, onStatus, onError } = {}) {
     this.onHeartRate = onHeartRate;
@@ -39,9 +48,9 @@ export class MiBandBle {
     this.handler = null;
     this.reconnectTimer = null;
     this.shouldReconnect = false;
-    this.notificationsStarted = false;
+    this.acceptingHr = false;
     this._onDisconnected = () => {
-      this.notificationsStarted = false;
+      this.acceptingHr = false;
       this.onStatus?.('disconnected', '藍牙已斷線');
       if (this.shouldReconnect) {
         this.scheduleReconnect();
@@ -50,9 +59,11 @@ export class MiBandBle {
   }
 
   get isConnected() {
-    return Boolean(
-      this.shouldReconnect && this.server?.connected && this.notificationsStarted,
-    );
+    return shouldAcceptHrNotification({
+      shouldReconnect: this.shouldReconnect,
+      gattConnected: Boolean(this.server?.connected),
+      acceptingHr: this.acceptingHr,
+    });
   }
 
   async connect() {
@@ -77,7 +88,7 @@ export class MiBandBle {
   }
 
   async connectGatt() {
-    this.notificationsStarted = false;
+    this.acceptingHr = false;
     this.onStatus?.('connecting', `連線中：${this.device?.name || 'MiBand'}…`);
     this.server = await this.device.gatt.connect();
     const service = await this.server.getPrimaryService(HRS_UUID);
@@ -102,9 +113,13 @@ export class MiBandBle {
     };
 
     this.characteristic.addEventListener('characteristicvaluechanged', this.handler);
+    this.acceptingHr = true;
+    this.onStatus?.('hr-ready');
     try {
       await this.characteristic.startNotifications();
     } catch (err) {
+      this.acceptingHr = false;
+      this.onStatus?.('hr-failed');
       this.characteristic.removeEventListener(
         'characteristicvaluechanged',
         this.handler,
@@ -112,7 +127,6 @@ export class MiBandBle {
       this.handler = null;
       throw err;
     }
-    this.notificationsStarted = true;
     this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
   }
 
@@ -146,7 +160,7 @@ export class MiBandBle {
         this.server.disconnect();
       }
     } finally {
-      this.notificationsStarted = false;
+      this.acceptingHr = false;
       this.characteristic = null;
       this.server = null;
       this.onStatus?.('idle', '未連線');

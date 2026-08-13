@@ -79,6 +79,14 @@ const ble = new MiBandBle({
     }
   },
   onStatus: (kind, text) => {
+    if (kind === 'hr-ready') {
+      transport?.resumeHr();
+      return;
+    }
+    if (kind === 'hr-failed') {
+      transport?.pauseHr();
+      return;
+    }
     setStatus(el.bleStatus, kind, text);
     if (kind === 'connected') {
       transport?.resumeHr();

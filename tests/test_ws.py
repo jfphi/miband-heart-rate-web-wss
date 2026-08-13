@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from server.app.rooms import rooms
-from server.app.server import app, is_room_switch
+from server.app.rooms import RoomManager
+from server.app.server import create_app, is_room_switch
 
 
 class RoomSwitchHelperTests(unittest.TestCase):
@@ -26,24 +26,19 @@ class RoomSwitchHelperTests(unittest.TestCase):
 
 class WsSwitchFullRoomTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._max = rooms._max_members
-        rooms._max_members = 1
-        rooms._rooms.clear()
-        for task in list(rooms._cleanup_tasks.values()):
-            task.cancel()
-        rooms._cleanup_tasks.clear()
+        self.mgr = RoomManager(max_members=1)
+        self.app = create_app(self.mgr)
 
     def tearDown(self) -> None:
-        rooms._max_members = self._max
-        rooms._rooms.clear()
-        for task in list(rooms._cleanup_tasks.values()):
+        for task in list(self.mgr._cleanup_tasks.values()):
             task.cancel()
-        rooms._cleanup_tasks.clear()
+        self.mgr._cleanup_tasks.clear()
+        self.mgr._rooms.clear()
 
     def test_switch_to_full_room_clears_local_membership(self) -> None:
         from fastapi.testclient import TestClient
 
-        with TestClient(app) as client:
+        with TestClient(self.app) as client:
             with client.websocket_connect("/ws") as filler:
                 filler.send_json(
                     {

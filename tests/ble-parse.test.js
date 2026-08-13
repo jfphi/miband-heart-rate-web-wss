@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseHeartRate } from '../public/js/ble.js';
+import { parseHeartRate, shouldAcceptHrNotification } from '../public/js/ble.js';
 
 function view(bytes) {
   return new DataView(Uint8Array.from(bytes).buffer);
@@ -31,5 +31,40 @@ describe('parseHeartRate', () => {
 
   it('rejects empty payloads', () => {
     assert.throws(() => parseHeartRate(view([])), /空的心率/);
+  });
+});
+
+describe('shouldAcceptHrNotification', () => {
+  it('accepts once GATT is up and HR is armed, even before notifications succeed', () => {
+    assert.equal(
+      shouldAcceptHrNotification({
+        shouldReconnect: true,
+        gattConnected: true,
+        acceptingHr: true,
+      }),
+      true,
+    );
+  });
+
+  it('rejects before HR is armed', () => {
+    assert.equal(
+      shouldAcceptHrNotification({
+        shouldReconnect: true,
+        gattConnected: true,
+        acceptingHr: false,
+      }),
+      false,
+    );
+  });
+
+  it('rejects after disconnect', () => {
+    assert.equal(
+      shouldAcceptHrNotification({
+        shouldReconnect: false,
+        gattConnected: true,
+        acceptingHr: true,
+      }),
+      false,
+    );
   });
 });
