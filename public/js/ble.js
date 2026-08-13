@@ -37,6 +37,15 @@ export function shouldAcceptHrNotification({
   return Boolean(shouldReconnect && gattConnected && acceptingHr);
 }
 
+/** True only after startNotifications succeeded. Drives isConnected / resumeHr. */
+export function isHrStreamReady({
+  shouldReconnect,
+  gattConnected,
+  notificationsStarted,
+}) {
+  return Boolean(shouldReconnect && gattConnected && notificationsStarted);
+}
+
 /**
  * Map BLE machine events to status-pill CSS kind + optional HR throttle action.
  * `hr-ready` / `hr-failed` are not CSS classes; they must not skip the pill.
@@ -94,11 +103,11 @@ export class MiBandBle {
   }
 
   get isConnected() {
-    return Boolean(
-      this.shouldReconnect &&
-        this.server?.connected &&
-        this.notificationsStarted,
-    );
+    return isHrStreamReady({
+      shouldReconnect: this.shouldReconnect,
+      gattConnected: Boolean(this.server?.connected),
+      notificationsStarted: this.notificationsStarted,
+    });
   }
 
   async connect() {

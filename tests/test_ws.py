@@ -6,6 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import httpx2
+
+httpx2.alias_httpx()
+
+from fastapi.testclient import TestClient
+
 from server.app.rooms import RoomManager
 from server.app.server import create_app, is_room_switch
 
@@ -36,8 +42,6 @@ class WsSwitchFullRoomTests(unittest.TestCase):
         self.mgr._rooms.clear()
 
     def test_switch_to_full_room_clears_local_membership(self) -> None:
-        from fastapi.testclient import TestClient
-
         with TestClient(self.app) as client:
             with client.websocket_connect("/ws") as filler:
                 filler.send_json(

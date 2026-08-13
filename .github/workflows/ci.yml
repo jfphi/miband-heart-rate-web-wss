@@ -19,7 +19,7 @@ jobs:
         run: |
           uv sync --frozen
           uv run python -m unittest discover -s tests -p "test_*.py"
-          node --experimental-default-type=module --test tests/*.test.js
+          node --test tests/*.test.js
 
       - name: Deploy
         # Only run this step if the branch is master
@@ -27,4 +27,8 @@ jobs:
         env:
           deploy_url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
-          curl "$deploy_url"
+          if [ -z "$deploy_url" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set"
+            exit 1
+          fi
+          curl -fsS "$deploy_url"

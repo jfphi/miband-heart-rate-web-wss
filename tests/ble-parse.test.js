@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  isHrStreamReady,
   mapBleUiStatus,
   parseHeartRate,
   shouldAcceptHrNotification,
@@ -78,6 +79,57 @@ describe('shouldAcceptHrNotification', () => {
         shouldReconnect: true,
         gattConnected: false,
         acceptingHr: true,
+      }),
+      false,
+    );
+  });
+});
+
+describe('isHrStreamReady', () => {
+  it('is true only after notifications have started', () => {
+    assert.equal(
+      isHrStreamReady({
+        shouldReconnect: true,
+        gattConnected: true,
+        notificationsStarted: true,
+      }),
+      true,
+    );
+  });
+
+  it('is false during the hr-ready window (accepting HR but notifications not started)', () => {
+    assert.equal(
+      isHrStreamReady({
+        shouldReconnect: true,
+        gattConnected: true,
+        notificationsStarted: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldAcceptHrNotification({
+        shouldReconnect: true,
+        gattConnected: true,
+        acceptingHr: true,
+      }),
+      true,
+    );
+  });
+
+  it('is false when GATT is down or reconnect is off', () => {
+    assert.equal(
+      isHrStreamReady({
+        shouldReconnect: true,
+        gattConnected: false,
+        notificationsStarted: true,
+      }),
+      false,
+    );
+    assert.equal(
+      isHrStreamReady({
+        shouldReconnect: false,
+        gattConnected: true,
+        notificationsStarted: true,
       }),
       false,
     );
