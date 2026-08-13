@@ -35,6 +35,26 @@ class HttpxCompatTests(unittest.TestCase):
             else:
                 sys.modules["httpx"] = previous
 
+    def test_rejects_preexisting_other_httpcore(self) -> None:
+        import types
+
+        previous_httpx = sys.modules.pop("httpx", None)
+        previous_httpcore = sys.modules.get("httpcore")
+        fake = types.ModuleType("httpcore")
+        sys.modules["httpcore"] = fake
+        try:
+            with self.assertRaisesRegex(RuntimeError, "import httpcore"):
+                ensure_httpx_alias()
+        finally:
+            if previous_httpcore is None:
+                sys.modules.pop("httpcore", None)
+            else:
+                sys.modules["httpcore"] = previous_httpcore
+            if previous_httpx is not None:
+                sys.modules["httpx"] = previous_httpx
+            else:
+                ensure_httpx_alias()
+
     def test_wraps_alias_runtime_error(self) -> None:
         import httpx2
 
@@ -43,14 +63,13 @@ class HttpxCompatTests(unittest.TestCase):
             with patch.object(
                 httpx2, "alias_httpx", side_effect=RuntimeError("already imported")
             ):
-                with self.assertRaisesRegex(RuntimeError, "無法把 httpx 指向 httpx2"):
+                with self.assertRaisesRegex(RuntimeError, "httpx/httpcore"):
                     ensure_httpx_alias()
         finally:
             if previous is not None:
                 sys.modules["httpx"] = previous
             else:
                 ensure_httpx_alias()
-
 
 
 if __name__ == "__main__":
