@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import httpx2
+from tests.httpx_compat import ensure_httpx_alias
 
-httpx2.alias_httpx()
+ensure_httpx_alias()
 
 from fastapi.testclient import TestClient
 

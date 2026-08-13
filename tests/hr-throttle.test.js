@@ -282,19 +282,28 @@ describe('createHrThrottle', () => {
   });
 
   it('resume keeps the buffer when canSend is false', async () => {
-    const sent = [];
-    const publish = createHrThrottle(async (p) => sent.push(p));
-    publish.startKeepalive(() => false);
-    publish.pause();
-    assert.equal(await publish({ bpm: 80, contact: true, ts: 0 }), false);
-    assert.equal(await publish.resume(), false);
-    assert.equal(sent.length, 0);
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    try {
+      const sent = [];
+      const publish = createHrThrottle(async (p) => sent.push(p), {
+        minIntervalMs: 1000,
+        maxSilenceMs: 4000,
+      });
+      publish.startKeepalive(() => false);
+      publish.pause();
+      assert.equal(await publish({ bpm: 80, contact: true, ts: 0 }), false);
+      assert.equal(await publish.resume(), false);
+      mock.timers.tick(8000);
+      assert.equal(sent.length, 0);
 
-    publish.startKeepalive(() => true);
-    assert.equal(await publish.flush(), true);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].bpm, 80);
-    publish.stopKeepalive();
+      publish.startKeepalive(() => true);
+      assert.equal(await publish.flush(), true);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].bpm, 80);
+      publish.stopKeepalive();
+    } finally {
+      mock.timers.reset();
+    }
   });
 
   it('resume with no buffered sample does not send', async () => {
