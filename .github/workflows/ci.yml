@@ -1,0 +1,30 @@
+# .github/workflows/ci.yml
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test
+        run: |
+          uv sync --frozen
+          uv run python -m unittest discover -s tests -p "test_*.py"
+          node --experimental-default-type=module --test tests/*.test.js
+
+      - name: Deploy
+        # Only run this step if the branch is master
+        if: github.ref == 'refs/heads/master'
+        env:
+          deploy_url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          curl "$deploy_url"
