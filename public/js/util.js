@@ -41,6 +41,7 @@ export function reconnectDelayMs(attempt, { baseMs = 1000, maxMs = 15000 } = {})
 
 export const WS_PING_INTERVAL_MS = 15000;
 export const WS_PONG_TIMEOUT_MS = 45000;
+export const WS_READY_STATE_OPEN = 1;
 
 /** True when an open socket has gone too long without a pong. */
 export function pongTimedOut(
@@ -50,6 +51,30 @@ export function pongTimedOut(
 ) {
   if (lastPongAt == null) return false;
   return now - lastPongAt > timeoutMs;
+}
+
+/**
+ * One ping-interval tick. Returns 'skip' | 'timeout' | 'ping'.
+ * timeout closes the socket so the transport can reconnect.
+ */
+export function runWsPingTick({
+  readyState,
+  lastPongAt,
+  now = Date.now(),
+  sendPing,
+  close,
+}) {
+  if (readyState !== WS_READY_STATE_OPEN) return 'skip';
+  if (pongTimedOut(lastPongAt, now)) {
+    close();
+    return 'timeout';
+  }
+  try {
+    sendPing();
+  } catch {
+    /* ignore */
+  }
+  return 'ping';
 }
 
 /**

@@ -1,8 +1,8 @@
 import {
   createHrThrottle,
   generateRoomCode,
-  pongTimedOut,
   reconnectDelayMs,
+  runWsPingTick,
   WS_PING_INTERVAL_MS,
 } from '../util.js';
 
@@ -71,16 +71,15 @@ export function createWssTransport(cfg) {
     if (pingTimer != null) return;
     pingTimer = setInterval(() => {
       const socket = ws;
-      if (!socket || socket.readyState !== WebSocket.OPEN) return;
-      if (pongTimedOut(lastPongAt)) {
-        closeSocket(socket);
-        return;
-      }
-      try {
-        socket.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
-      } catch {
-        /* ignore */
-      }
+      if (!socket) return;
+      runWsPingTick({
+        readyState: socket.readyState,
+        lastPongAt,
+        sendPing: () => {
+          socket.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+        },
+        close: () => closeSocket(socket),
+      });
     }, WS_PING_INTERVAL_MS);
   }
 

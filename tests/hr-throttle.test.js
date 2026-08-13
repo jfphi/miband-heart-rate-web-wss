@@ -5,6 +5,7 @@ import {
   isStale,
   pongTimedOut,
   reconnectDelayMs,
+  runWsPingTick,
 } from '../public/js/util.js';
 
 describe('pongTimedOut', () => {
@@ -18,6 +19,59 @@ describe('pongTimedOut', () => {
 
   it('is true after timeoutMs', () => {
     assert.equal(pongTimedOut(1000, 1000 + 45_001), true);
+  });
+});
+
+describe('runWsPingTick', () => {
+  it('skips when the socket is not open', () => {
+    const closed = [];
+    const pings = [];
+    assert.equal(
+      runWsPingTick({
+        readyState: 0,
+        lastPongAt: 0,
+        now: 50_000,
+        sendPing: () => pings.push(1),
+        close: () => closed.push(1),
+      }),
+      'skip',
+    );
+    assert.equal(closed.length, 0);
+    assert.equal(pings.length, 0);
+  });
+
+  it('sends ping when the socket is open and pong is fresh', () => {
+    const closed = [];
+    const pings = [];
+    assert.equal(
+      runWsPingTick({
+        readyState: 1,
+        lastPongAt: 1000,
+        now: 16_000,
+        sendPing: () => pings.push(1),
+        close: () => closed.push(1),
+      }),
+      'ping',
+    );
+    assert.equal(pings.length, 1);
+    assert.equal(closed.length, 0);
+  });
+
+  it('closes the socket when pong has timed out', () => {
+    const closed = [];
+    const pings = [];
+    assert.equal(
+      runWsPingTick({
+        readyState: 1,
+        lastPongAt: 1000,
+        now: 1000 + 45_001,
+        sendPing: () => pings.push(1),
+        close: () => closed.push(1),
+      }),
+      'timeout',
+    );
+    assert.equal(closed.length, 1);
+    assert.equal(pings.length, 0);
   });
 });
 

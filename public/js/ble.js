@@ -39,7 +39,9 @@ export class MiBandBle {
     this.handler = null;
     this.reconnectTimer = null;
     this.shouldReconnect = false;
+    this.notificationsStarted = false;
     this._onDisconnected = () => {
+      this.notificationsStarted = false;
       this.onStatus?.('disconnected', '藍牙已斷線');
       if (this.shouldReconnect) {
         this.scheduleReconnect();
@@ -48,7 +50,9 @@ export class MiBandBle {
   }
 
   get isConnected() {
-    return Boolean(this.shouldReconnect && this.server?.connected);
+    return Boolean(
+      this.shouldReconnect && this.server?.connected && this.notificationsStarted,
+    );
   }
 
   async connect() {
@@ -73,6 +77,7 @@ export class MiBandBle {
   }
 
   async connectGatt() {
+    this.notificationsStarted = false;
     this.onStatus?.('connecting', `連線中：${this.device?.name || 'MiBand'}…`);
     this.server = await this.device.gatt.connect();
     const service = await this.server.getPrimaryService(HRS_UUID);
@@ -96,9 +101,19 @@ export class MiBandBle {
       }
     };
 
-    this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
     this.characteristic.addEventListener('characteristicvaluechanged', this.handler);
-    await this.characteristic.startNotifications();
+    try {
+      await this.characteristic.startNotifications();
+    } catch (err) {
+      this.characteristic.removeEventListener(
+        'characteristicvaluechanged',
+        this.handler,
+      );
+      this.handler = null;
+      throw err;
+    }
+    this.notificationsStarted = true;
+    this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
   }
 
   scheduleReconnect() {
@@ -131,6 +146,7 @@ export class MiBandBle {
         this.server.disconnect();
       }
     } finally {
+      this.notificationsStarted = false;
       this.characteristic = null;
       this.server = null;
       this.onStatus?.('idle', '未連線');

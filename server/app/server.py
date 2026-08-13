@@ -42,6 +42,19 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def is_room_switch(
+    room_code: str | None,
+    client_id: str | None,
+    new_room: str,
+    new_client_id: str,
+) -> bool:
+    return bool(
+        room_code
+        and client_id
+        and (room_code != new_room or client_id != new_client_id)
+    )
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -69,7 +82,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     await websocket.send_json(error_message("無效的角色"))
                     continue
 
-                if room_code and client_id and (room_code != code or client_id != cid):
+                if is_room_switch(room_code, client_id, code, cid):
                     old_room = await rooms.leave(
                         room_code, client_id, websocket=websocket
                     )
