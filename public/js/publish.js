@@ -1,4 +1,4 @@
-import { MiBandBle } from './ble.js';
+import { mapBleUiStatus, MiBandBle } from './ble.js';
 import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
 import { createTransport, getConfiguredBackend } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
@@ -79,18 +79,16 @@ const ble = new MiBandBle({
     }
   },
   onStatus: (kind, text) => {
-    if (kind === 'hr-ready') {
-      transport?.resumeHr();
-      return;
+    const mapped = mapBleUiStatus(kind, text);
+    if (mapped.uiText) {
+      setStatus(el.bleStatus, mapped.uiKind, mapped.uiText);
     }
-    if (kind === 'hr-failed') {
-      transport?.pauseHr();
-      return;
-    }
-    setStatus(el.bleStatus, kind, text);
-    if (kind === 'connected') {
-      transport?.resumeHr();
-    } else if (kind === 'disconnected' || kind === 'idle') {
+    if (mapped.hr === 'resume') {
+      const resumed = transport?.resumeHr();
+      if (resumed && typeof resumed.then === 'function') {
+        void resumed.catch((err) => showError(err.message || String(err)));
+      }
+    } else if (mapped.hr === 'pause') {
       transport?.pauseHr();
     }
   },
@@ -164,7 +162,10 @@ async function init() {
       },
     });
     if (ble.isConnected) {
-      transport.resumeHr();
+      const resumed = transport.resumeHr();
+      if (resumed && typeof resumed.then === 'function') {
+        void resumed.catch((err) => showError(err.message || String(err)));
+      }
     }
   } catch (err) {
     // Hard failures only (cancelled / missing room). Transient WSS

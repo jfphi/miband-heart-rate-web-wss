@@ -37,6 +37,39 @@ export function shouldAcceptHrNotification({
   return Boolean(shouldReconnect && gattConnected && acceptingHr);
 }
 
+/**
+ * Map BLE machine events to status-pill CSS kind + optional HR throttle action.
+ * `hr-ready` / `hr-failed` are not CSS classes; they must not skip the pill.
+ */
+export function mapBleUiStatus(kind, text) {
+  if (kind === 'hr-ready') {
+    return {
+      uiKind: 'connecting',
+      uiText: text || '正在啟動心率通知…',
+      hr: null,
+    };
+  }
+  if (kind === 'hr-failed') {
+    return {
+      uiKind: 'error',
+      uiText: text || '心率通知啟動失敗',
+      hr: 'pause',
+    };
+  }
+  if (kind === 'connected') {
+    return { uiKind: 'connected', uiText: text, hr: 'resume' };
+  }
+  if (
+    kind === 'disconnected' ||
+    kind === 'idle' ||
+    kind === 'connecting' ||
+    kind === 'scanning'
+  ) {
+    return { uiKind: kind, uiText: text, hr: 'pause' };
+  }
+  return { uiKind: kind, uiText: text, hr: null };
+}
+
 export class MiBandBle {
   constructor({ onHeartRate, onStatus, onError } = {}) {
     this.onHeartRate = onHeartRate;
@@ -49,8 +82,10 @@ export class MiBandBle {
     this.reconnectTimer = null;
     this.shouldReconnect = false;
     this.acceptingHr = false;
+    this.notificationsStarted = false;
     this._onDisconnected = () => {
       this.acceptingHr = false;
+      this.notificationsStarted = false;
       this.onStatus?.('disconnected', '藍牙已斷線');
       if (this.shouldReconnect) {
         this.scheduleReconnect();
@@ -59,11 +94,11 @@ export class MiBandBle {
   }
 
   get isConnected() {
-    return shouldAcceptHrNotification({
-      shouldReconnect: this.shouldReconnect,
-      gattConnected: Boolean(this.server?.connected),
-      acceptingHr: this.acceptingHr,
-    });
+    return Boolean(
+      this.shouldReconnect &&
+        this.server?.connected &&
+        this.notificationsStarted,
+    );
   }
 
   async connect() {
@@ -89,6 +124,7 @@ export class MiBandBle {
 
   async connectGatt() {
     this.acceptingHr = false;
+    this.notificationsStarted = false;
     this.onStatus?.('connecting', `連線中：${this.device?.name || 'MiBand'}…`);
     this.server = await this.device.gatt.connect();
     const service = await this.server.getPrimaryService(HRS_UUID);
@@ -103,7 +139,15 @@ export class MiBandBle {
 
     this.characteristic = characteristic;
     this.handler = (event) => {
-      if (!this.isConnected) return;
+      if (
+        !shouldAcceptHrNotification({
+          shouldReconnect: this.shouldReconnect,
+          gattConnected: Boolean(this.server?.connected),
+          acceptingHr: this.acceptingHr,
+        })
+      ) {
+        return;
+      }
       try {
         const parsed = parseHeartRate(event.target.value);
         this.onHeartRate?.(parsed);
@@ -114,12 +158,13 @@ export class MiBandBle {
 
     this.characteristic.addEventListener('characteristicvaluechanged', this.handler);
     this.acceptingHr = true;
-    this.onStatus?.('hr-ready');
+    this.onStatus?.('hr-ready', '正在啟動心率通知…');
     try {
       await this.characteristic.startNotifications();
     } catch (err) {
       this.acceptingHr = false;
-      this.onStatus?.('hr-failed');
+      this.notificationsStarted = false;
+      this.onStatus?.('hr-failed', '心率通知啟動失敗');
       this.characteristic.removeEventListener(
         'characteristicvaluechanged',
         this.handler,
@@ -127,6 +172,7 @@ export class MiBandBle {
       this.handler = null;
       throw err;
     }
+    this.notificationsStarted = true;
     this.onStatus?.('connected', `已連線：${this.device.name || 'MiBand'}`);
   }
 
@@ -161,6 +207,7 @@ export class MiBandBle {
       }
     } finally {
       this.acceptingHr = false;
+      this.notificationsStarted = false;
       this.characteristic = null;
       this.server = null;
       this.onStatus?.('idle', '未連線');

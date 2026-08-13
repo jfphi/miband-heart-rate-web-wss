@@ -395,7 +395,7 @@ export function createWssTransport(cfg) {
     },
 
     resumeHr() {
-      sendHr.resume();
+      return sendHr.resume();
     },
 
     async leaveRoom() {

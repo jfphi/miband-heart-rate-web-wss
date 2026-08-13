@@ -149,7 +149,7 @@ export function createFirebaseTransport(cfg) {
     },
 
     resumeHr() {
-      sendHr.resume();
+      return sendHr.resume();
     },
 
     async leaveRoom() {

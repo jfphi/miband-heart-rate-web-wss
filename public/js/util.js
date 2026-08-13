@@ -83,7 +83,8 @@ export function runWsPingTick({
  * - bpm 不變：定期 heartbeat（maxSilenceMs）
  * - 內建 timer keepalive，不依賴 BLE 通知頻率
  * - flush()：重連後強制重送最後一筆
- * - pause()：BLE 斷線時停止送出；須 resume() 才會再送
+ * - pause()：停止送出並清掉緩衝（BLE 斷線／連線中）
+ * - 暫停期間仍可收下最新一筆；resume() 會強制送出緩衝
  * - sendFn 失敗不推進 lastSentAt，可自動重試
  */
 export function createHrThrottle(
@@ -138,8 +139,8 @@ export function createHrThrottle(
   }
 
   async function publish({ bpm, contact, ts }) {
-    if (!live) return false;
     latest = { bpm, contact: Boolean(contact) };
+    if (!live) return false;
     return emit({ force: false, ts });
   }
 
@@ -169,7 +170,7 @@ export function createHrThrottle(
 
   publish.flush = () => emit({ force: true });
 
-  /** Stop heartbeats (e.g. BLE dropped). Call resume() after GATT is up again. */
+  /** Stop sending. Clears buffer (disconnect / connecting). Samples while paused are stored for resume(). */
   publish.pause = () => {
     live = false;
     latest = null;
@@ -179,6 +180,7 @@ export function createHrThrottle(
 
   publish.resume = () => {
     live = true;
+    return emit({ force: true });
   };
 
   return publish;

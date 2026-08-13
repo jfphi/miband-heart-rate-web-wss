@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseHeartRate, shouldAcceptHrNotification } from '../public/js/ble.js';
+import {
+  mapBleUiStatus,
+  parseHeartRate,
+  shouldAcceptHrNotification,
+} from '../public/js/ble.js';
 
 function view(bytes) {
   return new DataView(Uint8Array.from(bytes).buffer);
@@ -66,5 +70,42 @@ describe('shouldAcceptHrNotification', () => {
       }),
       false,
     );
+  });
+
+  it('rejects when GATT is down', () => {
+    assert.equal(
+      shouldAcceptHrNotification({
+        shouldReconnect: true,
+        gattConnected: false,
+        acceptingHr: true,
+      }),
+      false,
+    );
+  });
+});
+
+describe('mapBleUiStatus', () => {
+  it('maps hr-ready to connecting pill without resuming HR', () => {
+    assert.deepEqual(mapBleUiStatus('hr-ready'), {
+      uiKind: 'connecting',
+      uiText: '正在啟動心率通知…',
+      hr: null,
+    });
+  });
+
+  it('maps hr-failed to error pill and pause', () => {
+    assert.deepEqual(mapBleUiStatus('hr-failed', '心率通知啟動失敗'), {
+      uiKind: 'error',
+      uiText: '心率通知啟動失敗',
+      hr: 'pause',
+    });
+  });
+
+  it('resumes only after connected', () => {
+    assert.equal(mapBleUiStatus('connected', '已連線').hr, 'resume');
+    assert.equal(mapBleUiStatus('connecting', '連線中').hr, 'pause');
+    assert.equal(mapBleUiStatus('scanning', '選擇小米手環…').hr, 'pause');
+    assert.equal(mapBleUiStatus('disconnected', '藍牙已斷線').hr, 'pause');
+    assert.equal(mapBleUiStatus('idle', '未連線').hr, 'pause');
   });
 });

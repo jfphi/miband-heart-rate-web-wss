@@ -254,7 +254,7 @@ describe('createHrThrottle', () => {
     }
   });
 
-  it('pause ignores samples until resume', async () => {
+  it('pause stops sending until resume flushes the buffered sample', async () => {
     mock.timers.enable({ apis: ['setInterval', 'Date'] });
     try {
       const sent = [];
@@ -272,12 +272,20 @@ describe('createHrThrottle', () => {
       assert.equal(await publish({ bpm: 99, contact: true, ts: Date.now() }), false);
       assert.equal(sent.length, 1);
 
-      publish.resume();
-      assert.equal(await publish({ bpm: 88, contact: true, ts: Date.now() }), true);
+      assert.equal(await publish.resume(), true);
       assert.equal(sent.length, 2);
+      assert.equal(sent[1].bpm, 99);
       publish.stopKeepalive();
     } finally {
       mock.timers.reset();
     }
+  });
+
+  it('resume with no buffered sample does not send', async () => {
+    const sent = [];
+    const publish = createHrThrottle(async (p) => sent.push(p));
+    publish.pause();
+    assert.equal(await publish.resume(), false);
+    assert.equal(sent.length, 0);
   });
 });
