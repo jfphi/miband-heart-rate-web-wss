@@ -288,4 +288,14 @@ describe('createHrThrottle', () => {
     assert.equal(await publish.resume(), false);
     assert.equal(sent.length, 0);
   });
+
+  it('pause after a buffered sample discards it (hr-failed path)', async () => {
+    const sent = [];
+    const publish = createHrThrottle(async (p) => sent.push(p));
+    publish.pause();
+    assert.equal(await publish({ bpm: 99, contact: true, ts: 0 }), false);
+    publish.pause();
+    assert.equal(await publish.resume(), false);
+    assert.equal(sent.length, 0);
+  });
 });
