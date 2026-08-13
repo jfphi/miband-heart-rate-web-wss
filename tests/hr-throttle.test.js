@@ -184,4 +184,28 @@ describe('createHrThrottle', () => {
       mock.timers.reset();
     }
   });
+
+  it('pause stops keepalive and flush until the next BLE sample', async () => {
+    mock.timers.enable({ apis: ['setInterval', 'Date'] });
+    try {
+      const sent = [];
+      const publish = createHrThrottle(async (p) => sent.push(p), {
+        minIntervalMs: 1000,
+        maxSilenceMs: 4000,
+      });
+      publish.startKeepalive(() => true);
+
+      assert.equal(await publish({ bpm: 88, contact: true, ts: 0 }), true);
+      publish.pause();
+      mock.timers.tick(8000);
+      assert.equal(sent.length, 1);
+      assert.equal(await publish.flush(), false);
+
+      assert.equal(await publish({ bpm: 88, contact: true, ts: Date.now() }), true);
+      assert.equal(sent.length, 2);
+      publish.stopKeepalive();
+    } finally {
+      mock.timers.reset();
+    }
+  });
 });

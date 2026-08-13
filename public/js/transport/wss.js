@@ -40,6 +40,7 @@ export function createWssTransport(cfg) {
   let reconnectAttempt = 0;
   /** Bumped on leave / new join to cancel in-flight reconnect work. */
   let sessionGen = 0;
+  let pingTimer = null;
 
   const sendHr = createHrThrottle(async ({ bpm, contact, ts }) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -53,6 +54,26 @@ export function createWssTransport(cfg) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+  }
+
+  function clearPing() {
+    if (pingTimer != null) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+  }
+
+  function startPing() {
+    if (pingTimer != null) return;
+    pingTimer = setInterval(() => {
+      try {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 15000);
   }
 
   function isSession(gen) {
@@ -162,6 +183,8 @@ export function createWssTransport(cfg) {
         });
         break;
       }
+      case 'pong':
+        break;
       case 'error':
         onError?.(msg.message || '伺服器錯誤');
         break;
@@ -284,6 +307,7 @@ export function createWssTransport(cfg) {
       shouldReconnect = false;
       clearReconnect();
       sendHr.stopKeepalive();
+      clearPing();
       closeSocket(ws);
       ws = null;
       openPromise = null;
@@ -304,6 +328,7 @@ export function createWssTransport(cfg) {
 
       if (!roomCode) throw new Error('缺少房間碼');
 
+      startPing();
       if (role === 'publisher') {
         sendHr.startKeepalive(
           () => Boolean(ws) && ws.readyState === WebSocket.OPEN,
@@ -346,10 +371,15 @@ export function createWssTransport(cfg) {
       return sendHr(payload);
     },
 
+    pauseHr() {
+      sendHr.pause();
+    },
+
     async leaveRoom() {
       shouldReconnect = false;
       sessionGen += 1;
       clearReconnect();
+      clearPing();
       sendHr.stopKeepalive();
 
       const socket = ws;

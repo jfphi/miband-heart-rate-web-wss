@@ -45,6 +45,7 @@ export function reconnectDelayMs(attempt, { baseMs = 1000, maxMs = 15000 } = {})
  * - bpm 不變：定期 heartbeat（maxSilenceMs）
  * - 內建 timer keepalive，不依賴 BLE 通知頻率
  * - flush()：重連後強制重送最後一筆
+ * - pause()：BLE 斷線時清掉 latest，避免心跳舊 bpm
  * - sendFn 失敗不推進 lastSentAt，可自動重試
  */
 export function createHrThrottle(
@@ -56,10 +57,11 @@ export function createHrThrottle(
   /** @type {number | null} */
   let lastSentAt = null;
   let keepaliveTimer = null;
+  let live = true;
   let canSendFn = () => true;
 
   async function emit({ force = false, ts } = {}) {
-    if (!latest) return false;
+    if (!live || !latest) return false;
     if (!canSendFn()) return false;
 
     const now = ts ?? Date.now();
@@ -98,6 +100,7 @@ export function createHrThrottle(
   }
 
   async function publish({ bpm, contact, ts }) {
+    live = true;
     latest = { bpm, contact: Boolean(contact) };
     return emit({ force: false, ts });
   }
@@ -127,6 +130,14 @@ export function createHrThrottle(
   };
 
   publish.flush = () => emit({ force: true });
+
+  /** Stop heartbeats (e.g. BLE dropped). Next BLE sample re-arms via publish(). */
+  publish.pause = () => {
+    live = false;
+    latest = null;
+    lastSentBpm = null;
+    lastSentAt = null;
+  };
 
   return publish;
 }

@@ -39,6 +39,12 @@ export class MiBandBle {
     this.handler = null;
     this.reconnectTimer = null;
     this.shouldReconnect = false;
+    this._onDisconnected = () => {
+      this.onStatus?.('disconnected', '藍牙已斷線');
+      if (this.shouldReconnect) {
+        this.scheduleReconnect();
+      }
+    };
   }
 
   async connect() {
@@ -49,16 +55,15 @@ export class MiBandBle {
     this.shouldReconnect = true;
     this.onStatus?.('scanning', '選擇小米手環…');
 
+    if (this.device) {
+      this.device.removeEventListener('gattserverdisconnected', this._onDisconnected);
+    }
+
     this.device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [HRS_UUID] }],
     });
 
-    this.device.addEventListener('gattserverdisconnected', () => {
-      this.onStatus?.('disconnected', '藍牙已斷線');
-      if (this.shouldReconnect) {
-        this.scheduleReconnect();
-      }
-    });
+    this.device.addEventListener('gattserverdisconnected', this._onDisconnected);
 
     await this.connectGatt();
   }
@@ -67,8 +72,16 @@ export class MiBandBle {
     this.onStatus?.('connecting', `連線中：${this.device?.name || 'MiBand'}…`);
     this.server = await this.device.gatt.connect();
     const service = await this.server.getPrimaryService(HRS_UUID);
-    this.characteristic = await service.getCharacteristic(HRM_UUID);
+    const characteristic = await service.getCharacteristic(HRM_UUID);
 
+    if (this.characteristic && this.handler) {
+      this.characteristic.removeEventListener(
+        'characteristicvaluechanged',
+        this.handler,
+      );
+    }
+
+    this.characteristic = characteristic;
     this.handler = (event) => {
       try {
         const parsed = parseHeartRate(event.target.value);

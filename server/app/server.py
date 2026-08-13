@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 from .protocol import error_message, member_public
-from .rooms import rooms
+from .rooms import RoomFullError, rooms
 from .settings import get_public_config
 
 PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
@@ -70,7 +70,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     continue
 
                 if room_code and client_id and (room_code != code or client_id != cid):
-                    old_room = await rooms.leave(room_code, client_id)
+                    old_room = await rooms.leave(
+                        room_code, client_id, websocket=websocket
+                    )
                     if old_room:
                         await rooms.broadcast(
                             old_room,
@@ -83,13 +85,17 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                             exclude=client_id,
                         )
 
-                room, member, _prev = await rooms.join(
-                    room_code=code,
-                    client_id=cid,
-                    name=name,
-                    role=role,
-                    websocket=websocket,
-                )
+                try:
+                    room, member, _prev = await rooms.join(
+                        room_code=code,
+                        client_id=cid,
+                        name=name,
+                        role=role,
+                        websocket=websocket,
+                    )
+                except RoomFullError:
+                    await websocket.send_json(error_message("房間人數已滿"))
+                    continue
                 room_code = room.code
                 client_id = member.client_id
 
@@ -127,10 +133,12 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 except (TypeError, ValueError):
                     ts_int = None
 
-                room, member = await rooms.update_hr(
+                status, room, member = await rooms.update_hr(
                     room_code, client_id, bpm, contact, ts_int
                 )
-                if not room or not member:
+                if status == "drop":
+                    continue
+                if status != "ok" or not room or not member:
                     await websocket.send_json(error_message("僅 publisher 可推送心率"))
                     continue
                 await rooms.broadcast(
@@ -144,6 +152,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "ts": member.updated_at,
                     },
                 )
+
+            elif msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": data.get("ts")})
 
             elif msg_type == "leave":
                 break
@@ -159,7 +170,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             pass
     finally:
         if room_code and client_id:
-            room = await rooms.leave(room_code, client_id)
+            room = await rooms.leave(room_code, client_id, websocket=websocket)
             if room:
                 await rooms.broadcast(
                     room,

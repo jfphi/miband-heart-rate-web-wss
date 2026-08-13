@@ -78,7 +78,12 @@ const ble = new MiBandBle({
       showError(err.message || String(err));
     }
   },
-  onStatus: (kind, text) => setStatus(el.bleStatus, kind, text),
+  onStatus: (kind, text) => {
+    setStatus(el.bleStatus, kind, text);
+    if (kind === 'disconnected' || kind === 'idle') {
+      transport?.pauseHr();
+    }
+  },
   onError: (msg) => showError(msg),
 });
 
