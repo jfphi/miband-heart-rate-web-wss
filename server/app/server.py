@@ -4,13 +4,14 @@ import mimetypes
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
-from .protocol import error_message, member_public
-from .rooms import RoomFullError, RoomManager
+from .protocol import error_message, hr_message, member_public, mic_message
+from .rooms import Room, RoomFullError, RoomManager
 from .settings import get_public_config
 
 PUBLIC_DIR = Path(__file__).resolve().parents[2] / "public"
@@ -36,6 +37,31 @@ def is_room_switch(
 
 def _rooms(websocket: WebSocket) -> RoomManager:
     return websocket.app.state.rooms
+
+
+def _contact_from_payload(data: dict[str, Any]) -> bool | None:
+    if "contact" not in data or data.get("contact") is None:
+        return None
+    return bool(data.get("contact"))
+
+
+async def _broadcast_leave(
+    rooms: RoomManager, room: Room, client_id: str
+) -> None:
+    member = room.members.get(client_id)
+    if member is not None and member.role == "publisher":
+        payload = member.to_dict()
+        await rooms.broadcast(room, hr_message(payload, cleared=True))
+        await rooms.broadcast(room, mic_message(payload, cleared=True))
+    await rooms.broadcast(
+        room,
+        {
+            "type": "roster",
+            "action": "offline",
+            "clientId": client_id,
+            "updatedAt": _now_ms(),
+        },
+    )
 
 
 def _safe_public_file(rel_path: str) -> Path | None:
@@ -106,16 +132,7 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
                             room_code, client_id, websocket=websocket
                         )
                         if old_room:
-                            await rooms.broadcast(
-                                old_room,
-                                {
-                                    "type": "roster",
-                                    "action": "offline",
-                                    "clientId": client_id,
-                                    "updatedAt": _now_ms(),
-                                },
-                                exclude=client_id,
-                            )
+                            await _broadcast_leave(rooms, old_room, client_id)
                         room_code = None
                         client_id = None
 
@@ -160,7 +177,7 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
                     except (TypeError, ValueError):
                         await websocket.send_json(error_message("無效的心率值"))
                         continue
-                    contact = bool(data.get("contact"))
+                    contact = _contact_from_payload(data)
                     ts = data.get("ts")
                     try:
                         ts_int = int(ts) if ts is not None else None
@@ -180,16 +197,57 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
                     if status != "ok" or not room or not member:
                         await websocket.send_json(error_message("僅 publisher 可推送心率"))
                         continue
+                    await rooms.broadcast(room, hr_message(member.to_dict()))
+
+                elif msg_type == "hr_clear":
+                    if not room_code or not client_id:
+                        await websocket.send_json(error_message("請先加入房間"))
+                        continue
+                    status, room, member = await rooms.clear_hr(
+                        room_code, client_id, websocket=websocket
+                    )
+                    if status in {"drop", "stale"}:
+                        continue
+                    if status != "ok" or not room or not member:
+                        await websocket.send_json(error_message("僅 publisher 可推送心率"))
+                        continue
                     await rooms.broadcast(
-                        room,
-                        {
-                            "type": "hr",
-                            "clientId": member.client_id,
-                            "name": member.name,
-                            "bpm": member.bpm,
-                            "contact": member.contact,
-                            "ts": member.updated_at,
-                        },
+                        room, hr_message(member.to_dict(), cleared=True)
+                    )
+
+                elif msg_type == "mic":
+                    if not room_code or not client_id:
+                        await websocket.send_json(error_message("請先加入房間"))
+                        continue
+                    try:
+                        db = int(data.get("db"))
+                    except (TypeError, ValueError):
+                        await websocket.send_json(error_message("無效的音量值"))
+                        continue
+                    status, room, member = await rooms.update_mic(
+                        room_code, client_id, db, websocket=websocket
+                    )
+                    if status in {"drop", "stale"}:
+                        continue
+                    if status != "ok" or not room or not member:
+                        await websocket.send_json(error_message("僅 publisher 可推送音量"))
+                        continue
+                    await rooms.broadcast(room, mic_message(member.to_dict()))
+
+                elif msg_type == "mic_clear":
+                    if not room_code or not client_id:
+                        await websocket.send_json(error_message("請先加入房間"))
+                        continue
+                    status, room, member = await rooms.clear_mic(
+                        room_code, client_id, websocket=websocket
+                    )
+                    if status in {"drop", "stale"}:
+                        continue
+                    if status != "ok" or not room or not member:
+                        await websocket.send_json(error_message("僅 publisher 可推送音量"))
+                        continue
+                    await rooms.broadcast(
+                        room, mic_message(member.to_dict(), cleared=True)
                     )
 
                 elif msg_type == "ping":
@@ -211,15 +269,7 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
             if room_code and client_id:
                 room = await rooms.leave(room_code, client_id, websocket=websocket)
                 if room:
-                    await rooms.broadcast(
-                        room,
-                        {
-                            "type": "roster",
-                            "action": "offline",
-                            "clientId": client_id,
-                            "updatedAt": _now_ms(),
-                        },
-                    )
+                    await _broadcast_leave(rooms, room, client_id)
 
     @app.get("/")
     async def root_index() -> Response:

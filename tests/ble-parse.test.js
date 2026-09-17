@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, expect } from 'vitest';
 import {
   isHrStreamReady,
   mapBleUiStatus,
@@ -14,131 +13,139 @@ function view(bytes) {
 describe('parseHeartRate', () => {
   it('reads 8-bit bpm without contact bits', () => {
     const parsed = parseHeartRate(view([0x00, 72]));
-    assert.equal(parsed.bpm, 72);
-    assert.equal(parsed.contact, null);
+    expect(parsed.bpm).toBe(72);
+    expect(parsed.contact).toBeNull();
+    expect(parsed.flags).toBe(0);
   });
 
   it('reads 16-bit little-endian bpm', () => {
     const parsed = parseHeartRate(view([0x01, 0x2c, 0x01]));
-    assert.equal(parsed.bpm, 300);
+    expect(parsed.bpm).toBe(300);
+    expect(parsed.contact).toBeNull();
+    expect(parsed.flags).toBe(0x01);
   });
 
   it('reads contact supported + worn', () => {
     const parsed = parseHeartRate(view([0x06, 80]));
-    assert.equal(parsed.bpm, 80);
-    assert.equal(parsed.contact, true);
+    expect(parsed.bpm).toBe(80);
+    expect(parsed.contact).toBe(true);
   });
 
   it('reads contact supported + not worn', () => {
     const parsed = parseHeartRate(view([0x04, 60]));
-    assert.equal(parsed.contact, false);
+    expect(parsed.contact).toBe(false);
+  });
+
+  it('reads 16-bit bpm with contact detected', () => {
+    expect(parseHeartRate(view([0x07, 0x58, 0x02]))).toEqual({
+      bpm: 600,
+      contact: true,
+      flags: 0x07,
+    });
   });
 
   it('rejects empty payloads', () => {
-    assert.throws(() => parseHeartRate(view([])), /空的心率/);
+    expect(() => parseHeartRate(view([]))).toThrow(/空的心率/);
+    expect(() => parseHeartRate(null)).toThrow(/空的心率/);
+  });
+
+  it('rejects truncated 8-bit and 16-bit frames', () => {
+    expect(() => parseHeartRate(view([0x00]))).toThrow(/8-bit/);
+    expect(() => parseHeartRate(view([0x01, 0x2c]))).toThrow(/16-bit/);
   });
 });
 
 describe('shouldAcceptHrNotification', () => {
   it('accepts once GATT is up and HR is armed, even before notifications succeed', () => {
-    assert.equal(
+    expect(
       shouldAcceptHrNotification({
         shouldReconnect: true,
         gattConnected: true,
         acceptingHr: true,
       }),
-      true,
-    );
+    ).toBe(true);
   });
 
   it('rejects before HR is armed', () => {
-    assert.equal(
+    expect(
       shouldAcceptHrNotification({
         shouldReconnect: true,
         gattConnected: true,
         acceptingHr: false,
       }),
-      false,
-    );
+    ).toBe(false);
   });
 
   it('rejects after disconnect', () => {
-    assert.equal(
+    expect(
       shouldAcceptHrNotification({
         shouldReconnect: false,
         gattConnected: true,
         acceptingHr: true,
       }),
-      false,
-    );
+    ).toBe(false);
   });
 
   it('rejects when GATT is down', () => {
-    assert.equal(
+    expect(
       shouldAcceptHrNotification({
         shouldReconnect: true,
         gattConnected: false,
         acceptingHr: true,
       }),
-      false,
-    );
+    ).toBe(false);
   });
 });
 
 describe('isHrStreamReady', () => {
   it('is true only after notifications have started', () => {
-    assert.equal(
+    expect(
       isHrStreamReady({
         shouldReconnect: true,
         gattConnected: true,
         notificationsStarted: true,
       }),
-      true,
-    );
+    ).toBe(true);
   });
 
   it('is false during the hr-ready window (accepting HR but notifications not started)', () => {
-    assert.equal(
+    expect(
       isHrStreamReady({
         shouldReconnect: true,
         gattConnected: true,
         notificationsStarted: false,
       }),
-      false,
-    );
-    assert.equal(
+    ).toBe(false);
+    expect(
       shouldAcceptHrNotification({
         shouldReconnect: true,
         gattConnected: true,
         acceptingHr: true,
       }),
-      true,
-    );
+    ).toBe(true);
   });
 
   it('is false when GATT is down or reconnect is off', () => {
-    assert.equal(
+    expect(
       isHrStreamReady({
         shouldReconnect: true,
         gattConnected: false,
         notificationsStarted: true,
       }),
-      false,
-    );
-    assert.equal(
+    ).toBe(false);
+    expect(
       isHrStreamReady({
         shouldReconnect: false,
         gattConnected: true,
         notificationsStarted: true,
       }),
-      false,
-    );
+    ).toBe(false);
   });
 });
 
 describe('mapBleUiStatus', () => {
   it('maps hr-ready to connecting pill without resuming HR', () => {
-    assert.deepEqual(mapBleUiStatus('hr-ready'), {
+    expect(mapBleUiStatus('hr-ready')).toEqual({
       uiKind: 'connecting',
       uiText: '正在啟動心率通知…',
       hr: null,
@@ -146,7 +153,7 @@ describe('mapBleUiStatus', () => {
   });
 
   it('maps hr-failed to error pill and pause', () => {
-    assert.deepEqual(mapBleUiStatus('hr-failed', '心率通知啟動失敗'), {
+    expect(mapBleUiStatus('hr-failed', '心率通知啟動失敗')).toEqual({
       uiKind: 'error',
       uiText: '心率通知啟動失敗',
       hr: 'pause',
@@ -154,10 +161,10 @@ describe('mapBleUiStatus', () => {
   });
 
   it('resumes only after connected', () => {
-    assert.equal(mapBleUiStatus('connected', '已連線').hr, 'resume');
-    assert.equal(mapBleUiStatus('connecting', '連線中').hr, 'pause');
-    assert.equal(mapBleUiStatus('scanning', '選擇小米手環…').hr, 'pause');
-    assert.equal(mapBleUiStatus('disconnected', '藍牙已斷線').hr, 'pause');
-    assert.equal(mapBleUiStatus('idle', '未連線').hr, 'pause');
+    expect(mapBleUiStatus('connected', '已連線').hr).toBe('resume');
+    expect(mapBleUiStatus('connecting', '連線中').hr).toBe('pause');
+    expect(mapBleUiStatus('scanning', '選擇小米手環…').hr).toBe('pause');
+    expect(mapBleUiStatus('disconnected', '藍牙已斷線').hr).toBe('pause');
+    expect(mapBleUiStatus('idle', '未連線').hr).toBe('pause');
   });
 });

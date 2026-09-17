@@ -85,12 +85,14 @@ class RoomManagerTests(unittest.IsolatedAsyncioTestCase):
             websocket=ws,
         )
         far_future = 9_999_999_999_999
+        before = int(time.time() * 1000)
         status, _room, member = await mgr.update_hr("ROOM", "p1", 80, True, far_future)
+        after = int(time.time() * 1000)
         self.assertEqual(status, "ok")
         assert member is not None
-        now = int(time.time() * 1000)
-        self.assertLessEqual(member.updated_at or 0, now + 2_000)
-        self.assertGreater(member.updated_at or 0, now - 5_000)
+        self.assertNotEqual(member.updated_at, far_future)
+        self.assertGreaterEqual(member.updated_at or 0, before)
+        self.assertLessEqual(member.updated_at or 0, after + 2_000)
 
     async def test_update_hr_rate_limit_drops(self) -> None:
         mgr = RoomManager(hr_min_interval_ms=10_000)
@@ -233,6 +235,55 @@ class RoomManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flushed, "ok")
         assert member is not None
         self.assertEqual(member.bpm, 70)
+
+    async def test_session_replaced_notifies_old_socket(self) -> None:
+        mgr = RoomManager()
+        ws1 = DummyWS("old")
+        ws2 = DummyWS("new")
+        await mgr.join(
+            room_code="ABCD",
+            client_id="c1",
+            name="A",
+            role="publisher",
+            websocket=ws1,
+        )
+        room, member, _prev = await mgr.join(
+            room_code="ABCD",
+            client_id="c1",
+            name="A",
+            role="publisher",
+            websocket=ws2,
+        )
+        self.assertEqual(
+            ws1.sent,
+            [{"type": "session_replaced", "message": "已在其他分頁連線"}],
+        )
+        self.assertTrue(ws1.closed)
+        self.assertFalse(ws2.closed)
+        self.assertIs(member.websocket, ws2)
+        self.assertTrue(member.online)
+        self.assertIs(room.members["c1"].websocket, ws2)
+
+    async def test_publisher_leave_clears_bpm(self) -> None:
+        mgr = RoomManager()
+        ws = DummyWS("p")
+        await mgr.join(
+            room_code="ROOM",
+            client_id="p1",
+            name="P",
+            role="publisher",
+            websocket=ws,
+        )
+        await mgr.update_hr("ROOM", "p1", 88, True, None, websocket=ws)
+        await mgr.update_mic("ROOM", "p1", -40, websocket=ws)
+        gone = await mgr.leave("ROOM", "p1", websocket=ws)
+        self.assertIsNotNone(gone)
+        member = gone.members["p1"]
+        self.assertFalse(member.online)
+        self.assertIsNone(member.bpm)
+        self.assertIsNone(member.contact)
+        self.assertIsNone(member.db)
+        self.assertIsNotNone(member.updated_at)
 
 
 if __name__ == "__main__":

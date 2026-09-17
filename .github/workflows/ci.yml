@@ -22,8 +22,9 @@ jobs:
       - name: Test
         run: |
           uv sync --frozen
-          uv run python -m unittest discover -s tests -t . -p "test_*.py"
-          node --test tests/*.test.js
+          uv run pytest
+          npm ci
+          npx vitest run
 
       - name: Deploy
         # Only run this step if the branch is master

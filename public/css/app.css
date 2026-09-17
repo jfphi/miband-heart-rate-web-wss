@@ -208,8 +208,17 @@ button.active {
   background: var(--warn);
 }
 .status.disconnected::before,
-.status.error::before {
+.status.error::before,
+.status.replaced::before {
   background: var(--danger);
+}
+
+.status.requesting::before {
+  background: var(--warn);
+}
+
+.status.listening::before {
+  background: var(--ok);
 }
 
 .error {
@@ -220,7 +229,7 @@ button.active {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
   margin-top: 18px;
 }
@@ -308,4 +317,36 @@ button.active {
   margin-top: 24px;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.mic-panel {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.mic-db {
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin: 8px 0 4px;
+}
+
+.mic-meter {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.mic-meter-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent-2), var(--ok));
+  transition: width 0.12s linear;
+}
+
+.card .mic-meter {
+  margin-top: 8px;
 }

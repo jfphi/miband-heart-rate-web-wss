@@ -10,7 +10,7 @@
         "members": {
           "$clientId": {
             ".write": true,
-            ".validate": "newData.hasChildren(['name', 'role', 'online', 'updatedAt']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 32 && (newData.child('role').val() === 'publisher' || newData.child('role').val() === 'viewer') && newData.child('online').isBoolean() && newData.child('updatedAt').isNumber() && (!newData.hasChild('bpm') || newData.child('bpm').val() === null || (newData.child('bpm').isNumber() && newData.child('bpm').val() >= 0 && newData.child('bpm').val() <= 250)) && (!newData.hasChild('contact') || newData.child('contact').isBoolean())"
+            ".validate": "newData.hasChildren(['name', 'role', 'online', 'updatedAt']) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 32 && (newData.child('role').val() === 'publisher' || newData.child('role').val() === 'viewer') && newData.child('online').isBoolean() && newData.child('updatedAt').isNumber() && (!newData.hasChild('bpm') || newData.child('bpm').val() === null || (newData.child('bpm').isNumber() && newData.child('bpm').val() >= 0 && newData.child('bpm').val() <= 250)) && (!newData.hasChild('contact') || newData.child('contact').val() === null || newData.child('contact').isBoolean()) && (!newData.hasChild('db') || newData.child('db').val() === null || (newData.child('db').isNumber() && newData.child('db').val() >= -100 && newData.child('db').val() <= 0)) && (!newData.hasChild('soundUpdatedAt') || newData.child('soundUpdatedAt').val() === null || newData.child('soundUpdatedAt').isNumber())"
           }
         }
       }

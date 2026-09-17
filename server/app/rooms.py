@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import WebSocket
 
-from .protocol import member_public
+from .protocol import member_public, session_replaced_message
 
 
 OFFLINE_GRACE_SECONDS = 15
@@ -15,6 +15,8 @@ MAX_ROOM_MEMBERS = 40
 HR_MIN_INTERVAL_MS = 400
 TS_FUTURE_SLACK_MS = 2_000
 TS_PAST_SLACK_MS = 10_000
+MIC_DB_MIN = -100
+MIC_DB_MAX = 0
 
 HrStatus = Literal["ok", "drop", "forbidden", "missing", "stale"]
 
@@ -43,6 +45,14 @@ async def _close_quiet(websocket: WebSocket) -> None:
         pass
 
 
+async def _notify_replaced_and_close(websocket: WebSocket) -> None:
+    try:
+        await websocket.send_json(session_replaced_message())
+    except Exception:
+        pass
+    await _close_quiet(websocket)
+
+
 @dataclass
 class Member:
     client_id: str
@@ -50,10 +60,13 @@ class Member:
     role: str
     websocket: WebSocket
     bpm: int | None = None
-    contact: bool = False
+    contact: bool | None = None
     online: bool = True
     updated_at: int | None = None
     last_hr_at: int | None = None
+    db: int | None = None
+    sound_updated_at: int | None = None
+    last_mic_at: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +77,8 @@ class Member:
             "contact": self.contact,
             "online": self.online,
             "updated_at": self.updated_at,
+            "db": self.db,
+            "sound_updated_at": self.sound_updated_at,
         }
 
 
@@ -85,6 +100,26 @@ class RoomManager:
         self._cleanup_tasks: dict[str, asyncio.Task] = {}
         self._max_members = max_members
         self._hr_min_interval_ms = hr_min_interval_ms
+
+    def _live_publisher(
+        self,
+        room_code: str,
+        client_id: str,
+        websocket: WebSocket | None,
+    ) -> tuple[HrStatus, Room | None, Member | None]:
+        code = room_code.strip().upper()
+        room = self._rooms.get(code)
+        if not room:
+            return "missing", None, None
+        member = room.members.get(client_id)
+        if not member or member.role != "publisher":
+            return "forbidden", room, None
+        if websocket is not None and member.websocket is not websocket:
+            return "stale", room, None
+        return "ok", room, member
+
+    def _throttled(self, last_at: int | None, now: int) -> bool:
+        return last_at is not None and now - last_at < self._hr_min_interval_ms
 
     async def join(
         self,
@@ -121,15 +156,18 @@ class RoomManager:
                 role=role if role in {"publisher", "viewer"} else "viewer",
                 websocket=websocket,
                 bpm=previous.bpm if previous else None,
-                contact=previous.contact if previous else False,
+                contact=previous.contact if previous else None,
+                db=previous.db if previous else None,
+                sound_updated_at=previous.sound_updated_at if previous else None,
                 online=True,
                 updated_at=int(time.time() * 1000),
                 last_hr_at=None,
+                last_mic_at=None,
             )
             room.members[client_id] = member
 
         if previous_ws is not None:
-            asyncio.create_task(_close_quiet(previous_ws))
+            await _notify_replaced_and_close(previous_ws)
         return room, member, previous
 
     async def leave(
@@ -148,8 +186,14 @@ class RoomManager:
                 return room
             if websocket is not None and member.websocket is not websocket:
                 return None
+            now = int(time.time() * 1000)
             member.online = False
-            member.updated_at = int(time.time() * 1000)
+            member.updated_at = now
+            if member.role == "publisher":
+                member.bpm = None
+                member.contact = None
+                member.db = None
+                member.sound_updated_at = now
             self._schedule_removal(code, client_id)
             return room
 
@@ -179,32 +223,85 @@ class RoomManager:
         room_code: str,
         client_id: str,
         bpm: int,
-        contact: bool,
+        contact: bool | None,
         ts: int | None,
         *,
         websocket: WebSocket | None = None,
     ) -> tuple[HrStatus, Room | None, Member | None]:
-        code = room_code.strip().upper()
         async with self._lock:
-            room = self._rooms.get(code)
-            if not room:
-                return "missing", None, None
-            member = room.members.get(client_id)
-            if not member or member.role != "publisher":
-                return "forbidden", room, None
-            if websocket is not None and member.websocket is not websocket:
-                return "stale", room, None
+            status, room, member = self._live_publisher(
+                room_code, client_id, websocket
+            )
+            if status != "ok" or room is None or member is None:
+                return status, room, None
             now = int(time.time() * 1000)
-            if (
-                member.last_hr_at is not None
-                and now - member.last_hr_at < self._hr_min_interval_ms
-            ):
+            if self._throttled(member.last_hr_at, now):
                 return "drop", room, None
             member.bpm = max(0, min(250, int(bpm)))
-            member.contact = bool(contact)
+            member.contact = None if contact is None else bool(contact)
             member.online = True
-            member.updated_at = clamp_hr_ts(ts, now)
+            member.updated_at = now
             member.last_hr_at = now
+            return "ok", room, member
+
+    async def clear_hr(
+        self,
+        room_code: str,
+        client_id: str,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None, Member | None]:
+        async with self._lock:
+            status, room, member = self._live_publisher(
+                room_code, client_id, websocket
+            )
+            if status != "ok" or room is None or member is None:
+                return status, room, None
+            now = int(time.time() * 1000)
+            member.bpm = None
+            member.contact = None
+            member.updated_at = now
+            return "ok", room, member
+
+    async def update_mic(
+        self,
+        room_code: str,
+        client_id: str,
+        db: int,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None, Member | None]:
+        async with self._lock:
+            status, room, member = self._live_publisher(
+                room_code, client_id, websocket
+            )
+            if status != "ok" or room is None or member is None:
+                return status, room, None
+            now = int(time.time() * 1000)
+            if self._throttled(member.last_mic_at, now):
+                return "drop", room, None
+            member.db = max(MIC_DB_MIN, min(MIC_DB_MAX, int(db)))
+            member.sound_updated_at = now
+            member.last_mic_at = now
+            member.online = True
+            return "ok", room, member
+
+    async def clear_mic(
+        self,
+        room_code: str,
+        client_id: str,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None, Member | None]:
+        async with self._lock:
+            status, room, member = self._live_publisher(
+                room_code, client_id, websocket
+            )
+            if status != "ok" or room is None or member is None:
+                return status, room, None
+            now = int(time.time() * 1000)
+            member.db = None
+            member.sound_updated_at = now
             return "ok", room, member
 
     async def broadcast(

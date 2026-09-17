@@ -1,6 +1,8 @@
 import {
   createHrThrottle,
+  createMicThrottle,
   generateRoomCode,
+  normalizeContact,
   reconnectDelayMs,
   runWsPingTick,
   WS_PING_INTERVAL_MS,
@@ -24,6 +26,20 @@ function closeSocket(socket) {
   } catch {
     /* ignore */
   }
+}
+
+function memberFromServer(m) {
+  return {
+    clientId: m.clientId,
+    name: m.name,
+    role: m.role,
+    bpm: m.bpm ?? null,
+    contact: normalizeContact(m.contact),
+    db: m.db ?? null,
+    soundUpdatedAt: m.soundUpdatedAt ?? null,
+    online: m.online !== false,
+    updatedAt: m.updatedAt ?? m.ts ?? null,
+  };
 }
 
 export function createWssTransport(cfg) {
@@ -51,6 +67,13 @@ export function createWssTransport(cfg) {
       throw new Error('WebSocket 尚未連線');
     }
     ws.send(JSON.stringify({ type: 'hr', bpm, contact, ts }));
+  });
+
+  const sendMic = createMicThrottle(async ({ db, ts }) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket 尚未連線');
+    }
+    ws.send(JSON.stringify({ type: 'mic', db, ts }));
   });
 
   function clearReconnect() {
@@ -98,6 +121,12 @@ export function createWssTransport(cfg) {
     ws.send(JSON.stringify(msg));
   }
 
+  function trySend(msg) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(msg));
+    return true;
+  }
+
   function sendJoin() {
     send({
       type: 'join',
@@ -128,12 +157,26 @@ export function createWssTransport(cfg) {
       name: '匿名',
       role: 'viewer',
       bpm: null,
-      contact: false,
+      contact: null,
+      db: null,
+      soundUpdatedAt: null,
       online: true,
       updatedAt: null,
     };
-    members.set(partial.clientId, { ...prev, ...partial });
+    const next = { ...prev, ...partial };
+    if (Object.prototype.hasOwnProperty.call(partial, 'contact')) {
+      next.contact = normalizeContact(partial.contact);
+    }
+    members.set(partial.clientId, next);
     emitRoster();
+  }
+
+  function haltPublishing() {
+    sendHr.stopKeepalive();
+    sendMic.stopKeepalive();
+    sendHr.pause();
+    sendMic.pause();
+    sendMic.reset();
   }
 
   function handleMessage(raw) {
@@ -149,20 +192,13 @@ export function createWssTransport(cfg) {
       case 'joined': {
         members.clear();
         (msg.members || []).forEach((m) => {
-          members.set(m.clientId, {
-            clientId: m.clientId,
-            name: m.name,
-            role: m.role,
-            bpm: m.bpm ?? null,
-            contact: Boolean(m.contact),
-            online: m.online !== false,
-            updatedAt: m.updatedAt ?? null,
-          });
+          members.set(m.clientId, memberFromServer(m));
         });
         emitRoster();
         onStatus?.('connected', '房間已連線');
         if (role === 'publisher') {
           void sendHr.flush().catch(() => {});
+          void sendMic.flush().catch(() => {});
         }
         break;
       }
@@ -173,25 +209,44 @@ export function createWssTransport(cfg) {
             members.set(msg.clientId, {
               ...existing,
               online: false,
-              updatedAt: msg.updatedAt ?? Date.now(),
+              updatedAt: msg.updatedAt ?? msg.ts ?? Date.now(),
             });
           }
         } else if (msg.member) {
-          upsertMember(msg.member);
+          upsertMember(memberFromServer(msg.member));
         }
         emitRoster();
         break;
       }
       case 'hr': {
+        const cleared = Boolean(msg.cleared) || msg.bpm == null;
         upsertMember({
           clientId: msg.clientId,
           name: msg.name,
           role: 'publisher',
-          bpm: msg.bpm,
-          contact: Boolean(msg.contact),
+          bpm: cleared ? null : msg.bpm,
+          contact: normalizeContact(msg.contact),
           online: true,
           updatedAt: msg.ts ?? Date.now(),
         });
+        break;
+      }
+      case 'mic': {
+        const cleared = Boolean(msg.cleared);
+        upsertMember({
+          clientId: msg.clientId,
+          name: msg.name,
+          role: 'publisher',
+          db: cleared ? null : (msg.db ?? null),
+          soundUpdatedAt: msg.ts ?? null,
+          online: true,
+        });
+        break;
+      }
+      case 'session_replaced': {
+        shouldReconnect = false;
+        haltPublishing();
+        onStatus?.('replaced', msg.message || '連線已由其他分頁取代');
         break;
       }
       case 'pong':
@@ -280,29 +335,38 @@ export function createWssTransport(cfg) {
           settled = true;
           reject(new Error(`無法連線到 ${url}`));
         }
-        if (isSession(gen)) {
+        if (isSession(gen) && ws === socket) {
           onStatus?.('reconnecting', '連線中斷，重連中…');
         }
       });
       socket.addEventListener('close', () => {
-        if (ws === socket) {
+        const isActiveSocket = ws === socket;
+        if (isActiveSocket) {
           ws = null;
           openPromise = null;
         }
-        if (gen === sessionGen) {
+        if (isActiveSocket && gen === sessionGen) {
           markSelfOffline();
         }
         if (!settled) {
           settled = true;
           reject(new Error(`無法連線到 ${url}`));
         }
-        if (isSession(gen)) {
+        // Only the live socket may arm reconnect — stale sockets must not fight it.
+        if (isActiveSocket && isSession(gen)) {
           scheduleReconnect(gen);
         }
       });
     });
 
     return openPromise;
+  }
+
+  function startPublisherKeepalives() {
+    if (role !== 'publisher') return;
+    const canSend = () => Boolean(ws) && ws.readyState === WebSocket.OPEN;
+    sendHr.startKeepalive(canSend, (err) => onError?.(err?.message || String(err)));
+    sendMic.startKeepalive(canSend, (err) => onError?.(err?.message || String(err)));
   }
 
   return {
@@ -325,6 +389,8 @@ export function createWssTransport(cfg) {
       shouldReconnect = false;
       clearReconnect();
       sendHr.stopKeepalive();
+      sendMic.stopKeepalive();
+      sendMic.reset();
       clearPing();
       lastPongAt = null;
       closeSocket(ws);
@@ -348,12 +414,7 @@ export function createWssTransport(cfg) {
       if (!roomCode) throw new Error('缺少房間碼');
 
       startPing();
-      if (role === 'publisher') {
-        sendHr.startKeepalive(
-          () => Boolean(ws) && ws.readyState === WebSocket.OPEN,
-          (err) => onError?.(err?.message || String(err)),
-        );
-      }
+      startPublisherKeepalives();
 
       onStatus?.('connecting', '加入房間中…');
       try {
@@ -387,7 +448,11 @@ export function createWssTransport(cfg) {
 
     async publishHr(payload) {
       if (role !== 'publisher') return false;
-      return sendHr(payload);
+      return sendHr({
+        bpm: payload.bpm,
+        contact: payload.contact,
+        ts: payload.ts,
+      });
     },
 
     pauseHr() {
@@ -398,12 +463,38 @@ export function createWssTransport(cfg) {
       return sendHr.resume();
     },
 
+    clearHr() {
+      sendHr.pause();
+      trySend({ type: 'hr_clear' });
+    },
+
+    async publishMic(payload) {
+      if (role !== 'publisher') return false;
+      return sendMic({ db: payload.db, ts: payload.ts });
+    },
+
+    pauseMic() {
+      sendMic.pause();
+    },
+
+    resumeMic() {
+      return sendMic.resume();
+    },
+
+    clearMic() {
+      sendMic.reset();
+      sendMic.pause();
+      trySend({ type: 'mic_clear' });
+    },
+
     async leaveRoom() {
       shouldReconnect = false;
       sessionGen += 1;
       clearReconnect();
       clearPing();
       sendHr.stopKeepalive();
+      sendMic.stopKeepalive();
+      sendMic.reset();
       lastPongAt = null;
 
       const socket = ws;

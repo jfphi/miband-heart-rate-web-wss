@@ -1,8 +1,8 @@
-import assert from 'node:assert/strict';
-import { describe, it, mock } from 'node:test';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createHrThrottle,
   isStale,
+  normalizeContact,
   pongTimedOut,
   reconnectDelayMs,
   runWsPingTick,
@@ -10,15 +10,15 @@ import {
 
 describe('pongTimedOut', () => {
   it('is false when no pong has been recorded', () => {
-    assert.equal(pongTimedOut(null, 50_000), false);
+    expect(pongTimedOut(null, 50_000)).toBe(false);
   });
 
   it('is false within the timeout window', () => {
-    assert.equal(pongTimedOut(1000, 1000 + 44_000), false);
+    expect(pongTimedOut(1000, 1000 + 44_000)).toBe(false);
   });
 
   it('is true after timeoutMs', () => {
-    assert.equal(pongTimedOut(1000, 1000 + 45_001), true);
+    expect(pongTimedOut(1000, 1000 + 45_001)).toBe(true);
   });
 });
 
@@ -26,7 +26,7 @@ describe('runWsPingTick', () => {
   it('skips when the socket is not open', () => {
     const closed = [];
     const pings = [];
-    assert.equal(
+    expect(
       runWsPingTick({
         readyState: 0,
         lastPongAt: 0,
@@ -34,16 +34,15 @@ describe('runWsPingTick', () => {
         sendPing: () => pings.push(1),
         close: () => closed.push(1),
       }),
-      'skip',
-    );
-    assert.equal(closed.length, 0);
-    assert.equal(pings.length, 0);
+    ).toBe('skip');
+    expect(closed.length).toBe(0);
+    expect(pings.length).toBe(0);
   });
 
   it('sends ping when the socket is open and pong is fresh', () => {
     const closed = [];
     const pings = [];
-    assert.equal(
+    expect(
       runWsPingTick({
         readyState: 1,
         lastPongAt: 1000,
@@ -51,16 +50,15 @@ describe('runWsPingTick', () => {
         sendPing: () => pings.push(1),
         close: () => closed.push(1),
       }),
-      'ping',
-    );
-    assert.equal(pings.length, 1);
-    assert.equal(closed.length, 0);
+    ).toBe('ping');
+    expect(pings.length).toBe(1);
+    expect(closed.length).toBe(0);
   });
 
   it('closes the socket when pong has timed out', () => {
     const closed = [];
     const pings = [];
-    assert.equal(
+    expect(
       runWsPingTick({
         readyState: 1,
         lastPongAt: 1000,
@@ -68,36 +66,48 @@ describe('runWsPingTick', () => {
         sendPing: () => pings.push(1),
         close: () => closed.push(1),
       }),
-      'timeout',
-    );
-    assert.equal(closed.length, 1);
-    assert.equal(pings.length, 0);
+    ).toBe('timeout');
+    expect(closed.length).toBe(1);
+    expect(pings.length).toBe(0);
   });
 });
 
 describe('reconnectDelayMs', () => {
   it('grows exponentially and caps at maxMs', () => {
-    assert.equal(reconnectDelayMs(0), 1000);
-    assert.equal(reconnectDelayMs(1), 2000);
-    assert.equal(reconnectDelayMs(2), 4000);
-    assert.equal(reconnectDelayMs(10), 15000);
+    expect(reconnectDelayMs(0)).toBe(1000);
+    expect(reconnectDelayMs(1)).toBe(2000);
+    expect(reconnectDelayMs(2)).toBe(4000);
+    expect(reconnectDelayMs(10)).toBe(15000);
   });
 });
 
 describe('isStale', () => {
   it('treats missing timestamps as stale', () => {
-    assert.equal(isStale(null), true);
-    assert.equal(isStale(undefined), true);
+    expect(isStale(null)).toBe(true);
+    expect(isStale(undefined)).toBe(true);
   });
 
   it('respects staleMs window', () => {
     const now = Date.now();
-    assert.equal(isStale(now - 1000, 8000), false);
-    assert.equal(isStale(now - 9000, 8000), true);
+    expect(isStale(now - 1000, 8000)).toBe(false);
+    expect(isStale(now - 9000, 8000)).toBe(true);
+  });
+});
+
+describe('normalizeContact', () => {
+  it('keeps null/undefined as null and does not Boolean(null)', () => {
+    expect(normalizeContact(null)).toBe(null);
+    expect(normalizeContact(undefined)).toBe(null);
+    expect(normalizeContact(true)).toBe(true);
+    expect(normalizeContact(false)).toBe(false);
   });
 });
 
 describe('createHrThrottle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('sends on bpm change after minInterval', async () => {
     const sent = [];
     const publish = createHrThrottle(async (p) => sent.push(p), {
@@ -105,13 +115,10 @@ describe('createHrThrottle', () => {
       maxSilenceMs: 4000,
     });
 
-    assert.equal(await publish({ bpm: 70, contact: true, ts: 1000 }), true);
-    assert.equal(await publish({ bpm: 71, contact: true, ts: 1500 }), false);
-    assert.equal(await publish({ bpm: 71, contact: true, ts: 2100 }), true);
-    assert.deepEqual(
-      sent.map((p) => p.bpm),
-      [70, 71],
-    );
+    expect(await publish({ bpm: 70, contact: true, ts: 1000 })).toBe(true);
+    expect(await publish({ bpm: 71, contact: true, ts: 1500 })).toBe(false);
+    expect(await publish({ bpm: 71, contact: true, ts: 2100 })).toBe(true);
+    expect(sent.map((p) => p.bpm)).toEqual([70, 71]);
   });
 
   it('heartbeats same bpm after maxSilenceMs', async () => {
@@ -121,11 +128,21 @@ describe('createHrThrottle', () => {
       maxSilenceMs: 4000,
     });
 
-    assert.equal(await publish({ bpm: 72, contact: true, ts: 0 }), true);
-    assert.equal(await publish({ bpm: 72, contact: true, ts: 3000 }), false);
-    assert.equal(await publish({ bpm: 72, contact: true, ts: 4000 }), true);
-    assert.equal(sent.length, 2);
-    assert.equal(sent[1].bpm, 72);
+    expect(await publish({ bpm: 72, contact: true, ts: 0 })).toBe(true);
+    expect(await publish({ bpm: 72, contact: true, ts: 3000 })).toBe(false);
+    expect(await publish({ bpm: 72, contact: true, ts: 4000 })).toBe(true);
+    expect(sent.length).toBe(2);
+    expect(sent[1].bpm).toBe(72);
+  });
+
+  it('stores contact null without coercing to false', async () => {
+    const sent = [];
+    const publish = createHrThrottle(async (p) => sent.push(p), {
+      minIntervalMs: 1000,
+      maxSilenceMs: 4000,
+    });
+    expect(await publish({ bpm: 70, contact: null, ts: 0 })).toBe(true);
+    expect(sent[0].contact).toBe(null);
   });
 
   it('keeps latest and retries after transient send failure', async () => {
@@ -139,13 +156,13 @@ describe('createHrThrottle', () => {
       { minIntervalMs: 1000, maxSilenceMs: 4000 },
     );
 
-    assert.equal(await publish({ bpm: 80, contact: false, ts: 0 }), false);
-    assert.equal(sent.length, 0);
+    expect(await publish({ bpm: 80, contact: false, ts: 0 })).toBe(false);
+    expect(sent.length).toBe(0);
 
     shouldFail = false;
-    assert.equal(await publish.flush(), true);
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].bpm, 80);
+    expect(await publish.flush()).toBe(true);
+    expect(sent.length).toBe(1);
+    expect(sent[0].bpm).toBe(80);
   });
 
   it('rethrows non-transient send errors', async () => {
@@ -155,8 +172,7 @@ describe('createHrThrottle', () => {
       },
       { minIntervalMs: 1000, maxSilenceMs: 4000 },
     );
-    await assert.rejects(
-      () => publish({ bpm: 70, contact: true, ts: 0 }),
+    await expect(publish({ bpm: 70, contact: true, ts: 0 })).rejects.toThrow(
       /PERMISSION_DENIED/,
     );
   });
@@ -169,40 +185,33 @@ describe('createHrThrottle', () => {
     });
 
     await publish({ bpm: 60, contact: true, ts: 0 });
-    assert.equal(await publish({ bpm: 61, contact: true, ts: 100 }), false);
-    assert.equal(await publish.flush(), true);
-    assert.deepEqual(
-      sent.map((p) => p.bpm),
-      [60, 61],
-    );
+    expect(await publish({ bpm: 61, contact: true, ts: 100 })).toBe(false);
+    expect(await publish.flush()).toBe(true);
+    expect(sent.map((p) => p.bpm)).toEqual([60, 61]);
   });
 
   it('keepalive ticks respect canSend and silence window', async () => {
-    mock.timers.enable({ apis: ['setInterval', 'Date'] });
-    try {
-      const sent = [];
-      let open = true;
-      const publish = createHrThrottle(async (p) => sent.push(p), {
-        minIntervalMs: 1000,
-        maxSilenceMs: 4000,
-      });
+    vi.useFakeTimers();
+    const sent = [];
+    let open = true;
+    const publish = createHrThrottle(async (p) => sent.push(p), {
+      minIntervalMs: 1000,
+      maxSilenceMs: 4000,
+    });
 
-      publish.startKeepalive(() => open);
-      assert.equal(await publish({ bpm: 90, contact: true, ts: 0 }), true);
+    publish.startKeepalive(() => open);
+    expect(await publish({ bpm: 90, contact: true, ts: 0 })).toBe(true);
 
-      open = false;
-      mock.timers.tick(5000);
-      assert.equal(sent.length, 1, 'closed socket must not keepalive');
+    open = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(sent.length).toBe(1);
 
-      open = true;
-      mock.timers.tick(1000);
-      assert.ok(sent.length >= 2, 'keepalive should resume when open');
-      assert.equal(sent.at(-1).bpm, 90);
+    open = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sent.length).toBeGreaterThanOrEqual(2);
+    expect(sent.at(-1).bpm).toBe(90);
 
-      publish.stopKeepalive();
-    } finally {
-      mock.timers.reset();
-    }
+    publish.stopKeepalive();
   });
 
   it('canSend false skips send but flush retries when open', async () => {
@@ -214,113 +223,101 @@ describe('createHrThrottle', () => {
     });
     publish.startKeepalive(() => open);
 
-    assert.equal(await publish({ bpm: 55, contact: true, ts: 0 }), false);
+    expect(await publish({ bpm: 55, contact: true, ts: 0 })).toBe(false);
     open = true;
-    assert.equal(await publish.flush(), true);
-    assert.equal(sent[0].bpm, 55);
+    expect(await publish.flush()).toBe(true);
+    expect(sent[0].bpm).toBe(55);
     publish.stopKeepalive();
   });
 
   it('keepalive surfaces non-transient errors and stops', async () => {
-    // Mock only setInterval so Date.now() stays real (silence window already elapsed).
-    mock.timers.enable({ apis: ['setInterval'] });
-    try {
-      const errors = [];
-      let fail = false;
-      const publish = createHrThrottle(
-        async () => {
-          if (fail) throw new Error('PERMISSION_DENIED');
-        },
-        { minIntervalMs: 1000, maxSilenceMs: 4000 },
-      );
+    // Fake only setInterval so Date.now() stays real (silence window already elapsed).
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const errors = [];
+    let fail = false;
+    const publish = createHrThrottle(
+      async () => {
+        if (fail) throw new Error('PERMISSION_DENIED');
+      },
+      { minIntervalMs: 1000, maxSilenceMs: 4000 },
+    );
 
-      assert.equal(await publish({ bpm: 66, contact: true, ts: 0 }), true);
-      fail = true;
-      publish.startKeepalive(
-        () => true,
-        (err) => errors.push(String(err?.message || err)),
-      );
-      mock.timers.tick(1000);
-      await Promise.resolve();
-      await Promise.resolve();
-      assert.equal(errors.length, 1);
-      assert.match(errors[0], /PERMISSION_DENIED/);
-      // Further ticks must not spam after stopKeepalive.
-      mock.timers.tick(5000);
-      await Promise.resolve();
-      assert.equal(errors.length, 1);
-    } finally {
-      mock.timers.reset();
-    }
+    expect(await publish({ bpm: 66, contact: true, ts: 0 })).toBe(true);
+    fail = true;
+    publish.startKeepalive(
+      () => true,
+      (err) => errors.push(String(err?.message || err)),
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toMatch(/PERMISSION_DENIED/);
+    // Further ticks must not spam after stopKeepalive.
+    await vi.advanceTimersByTimeAsync(5000);
+    await Promise.resolve();
+    expect(errors.length).toBe(1);
   });
 
   it('pause stops sending until resume flushes the buffered sample', async () => {
-    mock.timers.enable({ apis: ['setInterval', 'Date'] });
-    try {
-      const sent = [];
-      const publish = createHrThrottle(async (p) => sent.push(p), {
-        minIntervalMs: 1000,
-        maxSilenceMs: 4000,
-      });
-      publish.startKeepalive(() => true);
+    vi.useFakeTimers();
+    const sent = [];
+    const publish = createHrThrottle(async (p) => sent.push(p), {
+      minIntervalMs: 1000,
+      maxSilenceMs: 4000,
+    });
+    publish.startKeepalive(() => true);
 
-      assert.equal(await publish({ bpm: 88, contact: true, ts: 0 }), true);
-      publish.pause();
-      mock.timers.tick(8000);
-      assert.equal(sent.length, 1);
-      assert.equal(await publish.flush(), false);
-      assert.equal(await publish({ bpm: 99, contact: true, ts: Date.now() }), false);
-      assert.equal(sent.length, 1);
+    expect(await publish({ bpm: 88, contact: true, ts: 0 })).toBe(true);
+    publish.pause();
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(sent.length).toBe(1);
+    expect(await publish.flush()).toBe(false);
+    expect(await publish({ bpm: 99, contact: true, ts: Date.now() })).toBe(false);
+    expect(sent.length).toBe(1);
 
-      assert.equal(await publish.resume(), true);
-      assert.equal(sent.length, 2);
-      assert.equal(sent[1].bpm, 99);
-      publish.stopKeepalive();
-    } finally {
-      mock.timers.reset();
-    }
+    expect(await publish.resume()).toBe(true);
+    expect(sent.length).toBe(2);
+    expect(sent[1].bpm).toBe(99);
+    publish.stopKeepalive();
   });
 
   it('resume keeps the buffer when canSend is false', async () => {
-    mock.timers.enable({ apis: ['setInterval', 'Date'] });
-    try {
-      const sent = [];
-      const publish = createHrThrottle(async (p) => sent.push(p), {
-        minIntervalMs: 1000,
-        maxSilenceMs: 4000,
-      });
-      publish.startKeepalive(() => false);
-      publish.pause();
-      assert.equal(await publish({ bpm: 80, contact: true, ts: 0 }), false);
-      assert.equal(await publish.resume(), false);
-      mock.timers.tick(8000);
-      assert.equal(sent.length, 0);
+    vi.useFakeTimers();
+    const sent = [];
+    const publish = createHrThrottle(async (p) => sent.push(p), {
+      minIntervalMs: 1000,
+      maxSilenceMs: 4000,
+    });
+    publish.startKeepalive(() => false);
+    publish.pause();
+    expect(await publish({ bpm: 80, contact: true, ts: 0 })).toBe(false);
+    expect(await publish.resume()).toBe(false);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(sent.length).toBe(0);
 
-      publish.startKeepalive(() => true);
-      assert.equal(await publish.flush(), true);
-      assert.equal(sent.length, 1);
-      assert.equal(sent[0].bpm, 80);
-      publish.stopKeepalive();
-    } finally {
-      mock.timers.reset();
-    }
+    publish.startKeepalive(() => true);
+    expect(await publish.flush()).toBe(true);
+    expect(sent.length).toBe(1);
+    expect(sent[0].bpm).toBe(80);
+    publish.stopKeepalive();
   });
 
   it('resume with no buffered sample does not send', async () => {
     const sent = [];
     const publish = createHrThrottle(async (p) => sent.push(p));
     publish.pause();
-    assert.equal(await publish.resume(), false);
-    assert.equal(sent.length, 0);
+    expect(await publish.resume()).toBe(false);
+    expect(sent.length).toBe(0);
   });
 
   it('pause after a buffered sample discards it (hr-failed path)', async () => {
     const sent = [];
     const publish = createHrThrottle(async (p) => sent.push(p));
     publish.pause();
-    assert.equal(await publish({ bpm: 99, contact: true, ts: 0 }), false);
+    expect(await publish({ bpm: 99, contact: true, ts: 0 })).toBe(false);
     publish.pause();
-    assert.equal(await publish.resume(), false);
-    assert.equal(sent.length, 0);
+    expect(await publish.resume()).toBe(false);
+    expect(sent.length).toBe(0);
   });
 });

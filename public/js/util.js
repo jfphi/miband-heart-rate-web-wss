@@ -77,6 +77,21 @@ export function runWsPingTick({
   return 'ping';
 }
 
+/** Preserve unknown contact. Do not `Boolean(null)`. */
+export function normalizeContact(contact) {
+  return contact == null ? null : Boolean(contact);
+}
+
+function isTransientSendError(err) {
+  const msg = String(err?.message || err);
+  return (
+    msg.includes('尚未連線') ||
+    msg.includes('尚未就緒') ||
+    msg.includes('NETWORK_ERROR') ||
+    msg.includes('network')
+  );
+}
+
 /**
  * Throttle HR publishes:
  * - bpm 變化：最多約 1Hz（minIntervalMs）
@@ -122,15 +137,7 @@ export function createHrThrottle(
       await sendFn(payload);
     } catch (err) {
       // Swallow only transient transport gaps so BLE path does not flash errors.
-      const msg = String(err?.message || err);
-      if (
-        msg.includes('尚未連線') ||
-        msg.includes('尚未就緒') ||
-        msg.includes('NETWORK_ERROR') ||
-        msg.includes('network')
-      ) {
-        return false;
-      }
+      if (isTransientSendError(err)) return false;
       throw err;
     }
     lastSentBpm = latest.bpm;
@@ -139,7 +146,7 @@ export function createHrThrottle(
   }
 
   async function publish({ bpm, contact, ts }) {
-    latest = { bpm, contact: Boolean(contact) };
+    latest = { bpm, contact: normalizeContact(contact) };
     if (!live) return false;
     return emit({ force: false, ts });
   }
@@ -186,6 +193,111 @@ export function createHrThrottle(
   return publish;
 }
 
+/**
+ * Mic-level throttle: same cadence as HR (1Hz change / maxSilence keepalive)
+ * plus reset() so stop/clear cannot be overwritten by in-flight or pending sends.
+ */
+export function createMicThrottle(
+  sendFn,
+  { minIntervalMs = 1000, maxSilenceMs = 4000 } = {},
+) {
+  let latest = null;
+  let lastSentDb = null;
+  /** @type {number | null} */
+  let lastSentAt = null;
+  let keepaliveTimer = null;
+  let live = true;
+  let canSendFn = () => true;
+  /** Bumped by reset() so late emit / timers cannot publish after clear. */
+  let generation = 0;
+
+  async function emit({ force = false, ts } = {}) {
+    const gen = generation;
+    if (!live || !latest) return false;
+    if (!canSendFn()) return false;
+    if (gen !== generation) return false;
+
+    const now = ts ?? Date.now();
+    if (!force) {
+      const sameDb = latest.db === lastSentDb;
+      if (sameDb) {
+        if (lastSentAt != null && now - lastSentAt < maxSilenceMs) return false;
+      } else if (lastSentAt != null && now - lastSentAt < minIntervalMs) {
+        return false;
+      }
+    }
+
+    if (gen !== generation) return false;
+    const payload = {
+      db: latest.db,
+      ts: now,
+    };
+    try {
+      await sendFn(payload);
+    } catch (err) {
+      if (isTransientSendError(err)) return false;
+      throw err;
+    }
+    if (gen !== generation) return false;
+    lastSentDb = latest.db;
+    lastSentAt = now;
+    return true;
+  }
+
+  async function publish({ db, ts }) {
+    latest = { db };
+    if (!live) return false;
+    return emit({ force: false, ts });
+  }
+
+  /**
+   * @param {() => boolean} [canSend]
+   * @param {(err: unknown) => void} [onError]
+   */
+  publish.startKeepalive = (canSend, onError) => {
+    canSendFn = typeof canSend === 'function' ? canSend : () => true;
+    if (keepaliveTimer != null) return;
+    const interval = Math.max(500, Math.min(minIntervalMs, maxSilenceMs));
+    keepaliveTimer = setInterval(() => {
+      void emit({ force: false }).catch((err) => {
+        onError?.(err);
+        publish.stopKeepalive();
+      });
+    }, interval);
+  };
+
+  publish.stopKeepalive = () => {
+    if (keepaliveTimer != null) {
+      clearInterval(keepaliveTimer);
+      keepaliveTimer = null;
+    }
+  };
+
+  publish.flush = () => emit({ force: true });
+
+  publish.pause = () => {
+    live = false;
+    latest = null;
+    lastSentDb = null;
+    lastSentAt = null;
+  };
+
+  publish.resume = () => {
+    live = true;
+    return emit({ force: true });
+  };
+
+  /** Invalidate in-flight / pending publishes (e.g. after stop / mic_clear). */
+  publish.reset = () => {
+    generation += 1;
+    latest = null;
+    lastSentDb = null;
+    lastSentAt = null;
+  };
+
+  return publish;
+}
+
 export function formatAge(updatedAt) {
   if (!updatedAt) return '—';
   const seconds = Math.max(0, Math.floor((Date.now() - updatedAt) / 1000));
@@ -197,4 +309,13 @@ export function formatAge(updatedAt) {
 export function isStale(updatedAt, staleMs = 8000) {
   if (!updatedAt) return true;
   return Date.now() - updatedAt > staleMs;
+}
+
+export const formatMicAge = formatAge;
+export const isMicStale = isStale;
+
+/** Map dBFS (-100…0) to a 0–100 meter percent. */
+export function dbToMeterPercent(db) {
+  if (db == null || !Number.isFinite(db)) return 0;
+  return Math.max(0, Math.min(100, Math.round(((db + 100) / 100) * 100)));
 }

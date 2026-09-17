@@ -1,4 +1,11 @@
-import { mapBleUiStatus, MiBandBle } from './ble.js';
+import { createMicLevel, isMicSupported } from './audio/micLevel.js';
+import { dbToMeterPercent } from './audio/micThrottle.js';
+import {
+  hasPersistedBleSession,
+  isCancelledError,
+  mapBleUiStatus,
+  MiBandBle,
+} from './ble.js';
 import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
 import { createTransport, getConfiguredBackend } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
@@ -20,6 +27,11 @@ const el = {
   connectBle: document.getElementById('connectBle'),
   disconnectBle: document.getElementById('disconnectBle'),
   copyLink: document.getElementById('copyLink'),
+  micStatus: document.getElementById('micStatus'),
+  micDb: document.getElementById('micDb'),
+  micMeterFill: document.getElementById('micMeterFill'),
+  openMic: document.getElementById('openMic'),
+  stopMic: document.getElementById('stopMic'),
 };
 
 el.roomCode.textContent = room || '------';
@@ -43,6 +55,25 @@ function renderChart() {
   el.hrChart.innerHTML = renderHrSparkline(hrHistory, { width: 640, height: 64, now });
 }
 
+function restartPulse(node) {
+  node.classList.remove('pulse');
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      node.classList.add('pulse');
+    });
+  });
+}
+
+function contactLabel(contact) {
+  if (contact === true) return '佩戴狀態：已佩戴';
+  if (contact === false) return '佩戴狀態：未接觸';
+  return '佩戴狀態：未知';
+}
+
+function syncBleConnectLabel() {
+  el.connectBle.textContent = hasPersistedBleSession() ? '重新連線' : '連接小米手環';
+}
+
 if (!room) {
   showError('缺少房間碼，請從首頁建立房間');
   el.connectBle.disabled = true;
@@ -51,29 +82,101 @@ if (!room) {
 let transport = null;
 const clientId = getOrCreateClientId();
 let lastBpm = null;
+let allowMicPublish = false;
+const micSupported = isMicSupported();
+
+function clearLocalHr({ remote = false } = {}) {
+  lastBpm = null;
+  el.bpm.textContent = '--';
+  el.bpm.classList.remove('pulse');
+  el.contact.textContent = '佩戴狀態：—';
+  hrHistory = [];
+  renderChart();
+  if (remote) {
+    try {
+      transport?.clearHr?.();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function setLocalDb(db) {
+  el.micDb.textContent = db == null ? '--' : String(db);
+  el.micMeterFill.style.width = `${dbToMeterPercent(db)}%`;
+}
+
+function syncMicButtons(status) {
+  const active = status === 'listening' || status === 'requesting';
+  el.openMic.disabled = !micSupported || active;
+  el.stopMic.disabled = !active;
+}
+
+function haltMic({ remote = false } = {}) {
+  allowMicPublish = false;
+  mic.stop();
+  setLocalDb(null);
+  if (remote) {
+    try {
+      transport?.clearMic?.();
+    } catch {
+      /* ignore */
+    }
+  } else {
+    transport?.pauseMic?.();
+  }
+}
+
+async function haltSensors({ forgetBle = true } = {}) {
+  clearLocalHr({ remote: true });
+  haltMic({ remote: true });
+  try {
+    await ble.disconnect?.({ forget: forgetBle });
+  } catch {
+    /* ignore */
+  }
+  el.connectBle.disabled = false;
+  el.disconnectBle.disabled = true;
+  syncBleConnectLabel();
+}
 
 renderChart();
 setInterval(renderChart, 1000);
+syncBleConnectLabel();
+if (!micSupported) {
+  el.openMic.disabled = true;
+  setStatus(el.micStatus, 'error', '此瀏覽器不支援麥克風音量偵測');
+}
+
+const mic = createMicLevel({
+  onLevel: (db) => {
+    setLocalDb(db);
+    if (!allowMicPublish) return;
+    const published = transport?.publishMic?.({ db, ts: Date.now() });
+    if (published && typeof published.then === 'function') {
+      void published.catch((err) => showError(err.message || String(err)));
+    }
+  },
+  onStatus: (status, text) => {
+    setStatus(el.micStatus, status, text);
+    syncMicButtons(status);
+    if (status === 'listening') showError('');
+  },
+  onError: (msg) => showError(msg),
+});
 
 const ble = new MiBandBle({
   onHeartRate: async ({ bpm, contact }) => {
     if (bpm !== lastBpm) {
       el.bpm.textContent = String(bpm);
-      el.bpm.classList.remove('pulse');
-      void el.bpm.offsetWidth;
-      el.bpm.classList.add('pulse');
+      restartPulse(el.bpm);
       lastBpm = bpm;
       hrHistory = pushHrSample(hrHistory, bpm);
       renderChart();
     }
-    el.contact.textContent =
-      contact === null || contact === undefined
-        ? '佩戴狀態：未知'
-        : contact
-          ? '佩戴狀態：已接觸'
-          : '佩戴狀態：未接觸';
+    el.contact.textContent = contactLabel(contact);
     try {
-      await transport?.publishHr({ bpm, contact: Boolean(contact), ts: Date.now() });
+      await transport?.publishHr({ bpm, contact, ts: Date.now() });
     } catch (err) {
       showError(err.message || String(err));
     }
@@ -90,27 +193,65 @@ const ble = new MiBandBle({
       }
     } else if (mapped.hr === 'pause') {
       transport?.pauseHr();
+      if (kind === 'disconnected' || kind === 'idle' || kind === 'hr-failed') {
+        clearLocalHr({ remote: true });
+      }
     }
   },
   onError: (msg) => showError(msg),
 });
 
-el.connectBle.addEventListener('click', async () => {
+async function connectOrRestore({ allowPicker = true } = {}) {
   showError('');
   el.connectBle.disabled = true;
   try {
-    await ble.connect();
+    let restored = false;
+    if (hasPersistedBleSession() && typeof ble.tryRestore === 'function') {
+      restored = Boolean(await ble.tryRestore());
+    }
+    if (!restored) {
+      if (!allowPicker) {
+        el.connectBle.disabled = false;
+        syncBleConnectLabel();
+        return;
+      }
+      await ble.connect();
+    }
     el.disconnectBle.disabled = false;
+    el.connectBle.textContent = '連接小米手環';
   } catch (err) {
-    showError(err.message || String(err));
+    if (!isCancelledError?.(err)) {
+      showError(err.message || String(err));
+    }
     el.connectBle.disabled = false;
+    syncBleConnectLabel();
   }
+}
+
+el.connectBle.addEventListener('click', () => {
+  void connectOrRestore({ allowPicker: true });
 });
 
 el.disconnectBle.addEventListener('click', async () => {
-  await ble.disconnect();
+  await ble.disconnect({ forget: true });
+  clearLocalHr({ remote: true });
   el.connectBle.disabled = false;
   el.disconnectBle.disabled = true;
+  syncBleConnectLabel();
+});
+
+el.openMic.addEventListener('click', async () => {
+  showError('');
+  allowMicPublish = true;
+  const resumed = transport?.resumeMic?.();
+  if (resumed && typeof resumed.then === 'function') {
+    void resumed.catch((err) => showError(err.message || String(err)));
+  }
+  await mic.start();
+});
+
+el.stopMic.addEventListener('click', () => {
+  haltMic({ remote: true });
 });
 
 el.copyLink.addEventListener('click', async () => {
@@ -128,6 +269,8 @@ el.copyLink.addEventListener('click', async () => {
 });
 
 window.addEventListener('beforeunload', () => {
+  allowMicPublish = false;
+  mic.stop();
   transport?.leaveRoom();
 });
 
@@ -150,6 +293,12 @@ async function init() {
         el.rosterMeta.textContent = `房間人數：${online}（發布者 ${publishers}）`;
       },
       onStatus: (kind, text) => {
+        if (kind === 'replaced') {
+          setStatus(el.roomStatus, 'error', text);
+          showError(text);
+          void haltSensors({ forgetBle: true });
+          return;
+        }
         const statusKind = kind === 'reconnecting' ? 'connecting' : kind;
         setStatus(el.roomStatus, statusKind, text);
         if (kind === 'connected' || kind === 'reconnecting' || kind === 'connecting') {
@@ -166,6 +315,10 @@ async function init() {
       if (resumed && typeof resumed.then === 'function') {
         void resumed.catch((err) => showError(err.message || String(err)));
       }
+    }
+    if (hasPersistedBleSession()) {
+      syncBleConnectLabel();
+      void connectOrRestore({ allowPicker: false });
     }
   } catch (err) {
     // Hard failures only (cancelled / missing room). Transient WSS

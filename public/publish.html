@@ -47,6 +47,21 @@
           <button id="copyLink" class="secondary" type="button">複製監看連結</button>
         </div>
 
+        <div class="mic-panel">
+          <div class="row">
+            <span class="status idle" id="micStatus">麥克風未開啟</span>
+          </div>
+          <div class="mic-db" id="micDb">--</div>
+          <div class="mic-meter" aria-hidden="true">
+            <div class="mic-meter-fill" id="micMeterFill"></div>
+          </div>
+          <div class="row" style="margin-top: 12px">
+            <button id="openMic" type="button">開啟麥克風</button>
+            <button id="stopMic" class="secondary" type="button" disabled>停止麥克風</button>
+          </div>
+          <p class="hint" style="margin-top: 10px">只同步音量，不錄音、不傳聲音</p>
+        </div>
+
         <p id="error" class="error" hidden></p>
         <p class="hint" style="margin-top: 14px">
           請先在手環設定開啟心率廣播 / Share HR。僅 Chrome、Edge 可作為發布端。

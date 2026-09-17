@@ -8,7 +8,7 @@ import {
   onDisconnect,
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js';
-import { createHrThrottle, generateRoomCode } from '../util.js';
+import { createHrThrottle, createMicThrottle, generateRoomCode, normalizeContact } from '../util.js';
 
 function assertFirebaseConfig(cfg) {
   const firebase = cfg?.firebase || {};
@@ -25,7 +25,9 @@ function toMember(clientId, raw) {
     name: raw.name || '匿名',
     role: raw.role || 'viewer',
     bpm: typeof raw.bpm === 'number' ? raw.bpm : null,
-    contact: Boolean(raw.contact),
+    contact: normalizeContact(raw.contact),
+    db: typeof raw.db === 'number' ? raw.db : null,
+    soundUpdatedAt: typeof raw.soundUpdatedAt === 'number' ? raw.soundUpdatedAt : null,
     online: raw.online !== false,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : null,
   };
@@ -54,7 +56,18 @@ export function createFirebaseTransport(cfg) {
       bpm,
       contact,
       online: true,
-      updatedAt: ts,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  const sendMic = createMicThrottle(async ({ db, ts }) => {
+    if (!selfRef || role !== 'publisher') {
+      throw new Error('Firebase 尚未就緒');
+    }
+    await update(selfRef, {
+      db,
+      soundUpdatedAt: serverTimestamp(),
+      online: true,
     });
   });
 
@@ -64,6 +77,18 @@ export function createFirebaseTransport(cfg) {
       .map(([id, raw]) => toMember(id, raw))
       .filter(Boolean);
     onRoster(members);
+  }
+
+  function startPublisherKeepalives(onError) {
+    if (role !== 'publisher') return;
+    sendHr.startKeepalive(
+      () => Boolean(selfRef),
+      (err) => onError?.(err?.message || String(err)),
+    );
+    sendMic.startKeepalive(
+      () => Boolean(selfRef),
+      (err) => onError?.(err?.message || String(err)),
+    );
   }
 
   return {
@@ -87,6 +112,10 @@ export function createFirebaseTransport(cfg) {
       onError,
       onStatus: statusCb,
     }) {
+      sendHr.stopKeepalive();
+      sendMic.stopKeepalive();
+      sendMic.reset();
+
       roomCode = String(code || '').toUpperCase();
       role = joinRole;
       name = joinName || '匿名';
@@ -103,7 +132,9 @@ export function createFirebaseTransport(cfg) {
         name,
         role,
         bpm: null,
-        contact: false,
+        contact: null,
+        db: null,
+        soundUpdatedAt: null,
         online: true,
         updatedAt: Date.now(),
       };
@@ -114,6 +145,9 @@ export function createFirebaseTransport(cfg) {
         await onDisconnect(selfRef).update({
           online: false,
           updatedAt: serverTimestamp(),
+          bpm: null,
+          contact: null,
+          db: null,
         });
 
         if (unsubscribe) unsubscribe();
@@ -123,12 +157,7 @@ export function createFirebaseTransport(cfg) {
           (err) => onError?.(err.message || String(err)),
         );
 
-        if (role === 'publisher') {
-          sendHr.startKeepalive(
-            () => Boolean(selfRef),
-            (err) => onError?.(err?.message || String(err)),
-          );
-        }
+        startPublisherKeepalives(onError);
         onStatus?.('connected', '房間已連線');
       } catch (err) {
         onStatus?.('error', '無法加入房間');
@@ -141,7 +170,11 @@ export function createFirebaseTransport(cfg) {
 
     async publishHr(payload) {
       if (role !== 'publisher') return false;
-      return sendHr(payload);
+      return sendHr({
+        bpm: payload.bpm,
+        contact: payload.contact,
+        ts: payload.ts,
+      });
     },
 
     pauseHr() {
@@ -152,15 +185,66 @@ export function createFirebaseTransport(cfg) {
       return sendHr.resume();
     },
 
+    async clearHr() {
+      sendHr.pause();
+      if (!selfRef || role !== 'publisher') return;
+      try {
+        await update(selfRef, {
+          bpm: null,
+          contact: null,
+          online: true,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        /* ignore */
+      }
+    },
+
+    async publishMic(payload) {
+      if (role !== 'publisher') return false;
+      return sendMic({ db: payload.db, ts: payload.ts });
+    },
+
+    pauseMic() {
+      sendMic.pause();
+    },
+
+    resumeMic() {
+      return sendMic.resume();
+    },
+
+    async clearMic() {
+      sendMic.reset();
+      sendMic.pause();
+      if (!selfRef || role !== 'publisher') return;
+      try {
+        await update(selfRef, {
+          db: null,
+          soundUpdatedAt: serverTimestamp(),
+          online: true,
+        });
+      } catch {
+        /* ignore */
+      }
+    },
+
     async leaveRoom() {
       sendHr.stopKeepalive();
+      sendMic.stopKeepalive();
+      sendMic.reset();
       if (unsubscribe) {
         unsubscribe();
         unsubscribe = null;
       }
       if (selfRef) {
         try {
-          await update(selfRef, { online: false, updatedAt: Date.now() });
+          await update(selfRef, {
+            online: false,
+            updatedAt: serverTimestamp(),
+            bpm: null,
+            contact: null,
+            db: null,
+          });
         } catch {
           /* ignore */
         }

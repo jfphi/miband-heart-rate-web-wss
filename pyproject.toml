@@ -23,4 +23,5 @@ packages = ["server"]
 [dependency-groups]
 dev = [
     "httpx2>=2.10.0",
+    "pytest>=8.3.0",
 ]
