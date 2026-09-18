@@ -2,6 +2,7 @@ import { createMicLevel, isMicSupported } from './audio/micLevel.js';
 import { dbToMeterPercent } from './audio/micThrottle.js';
 import {
   hasPersistedBleSession,
+  errorText,
   isCancelledError,
   mapBleUiStatus,
   MiBandBle,
@@ -45,8 +46,14 @@ function setStatus(node, kind, text) {
 }
 
 function showError(msg) {
-  el.error.hidden = !msg;
-  el.error.textContent = msg || '';
+  const text = errorText(msg);
+  if (!text || isCancelledError(msg) || isCancelledError(text)) {
+    el.error.hidden = true;
+    el.error.textContent = '';
+    return;
+  }
+  el.error.hidden = false;
+  el.error.textContent = text;
 }
 
 function renderChart() {
@@ -220,8 +227,8 @@ async function connectOrRestore({ allowPicker = true } = {}) {
     el.disconnectBle.disabled = false;
     el.connectBle.textContent = '連接小米手環';
   } catch (err) {
-    if (!isCancelledError?.(err)) {
-      showError(err.message || String(err));
+    if (!isCancelledError(err)) {
+      showError(err);
     }
     el.connectBle.disabled = false;
     syncBleConnectLabel();

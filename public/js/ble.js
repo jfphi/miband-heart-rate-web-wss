@@ -100,12 +100,21 @@ function readPersistedDeviceId() {
   }
 }
 
+export function errorText(err) {
+  if (err == null) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err.message === 'string' && err.message) return err.message;
+  return String(err);
+}
+
 export function isCancelledError(err) {
-  const name = err instanceof Error ? err.name : '';
-  const msg = err instanceof Error ? err.message : String(err);
+  const name = err?.name != null ? String(err.name) : '';
+  const msg = errorText(err);
   return (
     /AbortError|NotFoundError/i.test(name) ||
-    /已取消連線|Connection cancelled|User cancelled|AbortError|NotFoundError/i.test(msg)
+    /已取消|使用者已取消|Connection cancelled|User cancelled|User canceled|requestDevice\(\) chooser|chooser dismissed|選擇器/i.test(
+      msg,
+    )
   );
 }
 
@@ -258,6 +267,8 @@ export class MiBandBle {
         });
       } catch (err) {
         if (this.isGenerationCancelled() || isCancelledError(err)) {
+          this.shouldReconnect = false;
+          this.onStatus?.('idle', MSG.idle);
           throw new Error(MSG.cancelled);
         }
         throw err;

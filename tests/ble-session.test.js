@@ -6,6 +6,7 @@ import {
   canRestoreBleDevice,
   clearPersistedBleSession,
   hasPersistedBleSession,
+  errorText,
   isCancelledError,
   isGattDisconnectedError,
   persistBleSession,
@@ -131,6 +132,13 @@ describe('isCancelledError', () => {
     expect(
       isCancelledError(new Error('User cancelled the requestDevice() chooser.')),
     ).toBe(true);
+    expect(
+      isCancelledError('User cancelled the requestDevice() chooser.'),
+    ).toBe(true);
+    expect(isCancelledError('使用者已取消 requestDevice() 選擇器。')).toBe(true);
+    expect(errorText({ message: 'User cancelled the requestDevice() chooser.' })).toBe(
+      'User cancelled the requestDevice() chooser.',
+    );
     expect(isCancelledError(new DOMException('Aborted', 'AbortError'))).toBe(true);
     const notFound = new Error('chooser dismissed');
     notFound.name = 'NotFoundError';
@@ -383,8 +391,13 @@ describe('MiBandBle restore / cancel / reconnect', () => {
         throw cancel;
       }),
     });
-    const ble = new MiBandBle();
+    const statuses = [];
+    const ble = new MiBandBle({
+      onStatus: (kind, text) => statuses.push({ kind, text }),
+    });
     await expect(ble.connect()).rejects.toThrow(/已取消連線/);
+    expect(statuses.at(-1)).toEqual({ kind: 'idle', text: '未連線' });
+    expect(ble.isConnected).toBe(false);
   });
 
   it('max auto-reconnect returns to idle and keeps persistence', async () => {
