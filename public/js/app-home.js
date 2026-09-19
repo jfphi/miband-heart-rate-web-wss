@@ -1,4 +1,5 @@
-import { createTransport, getConfiguredBackend } from './transport/index.js';
+import { formatDisplayVersion, loadConfig } from './config.js';
+import { createTransport } from './transport/index.js';
 import { buildPageUrl } from './util.js';
 
 const createName = document.getElementById('createName');
@@ -8,6 +9,7 @@ const createBtn = document.getElementById('createBtn');
 const joinBtn = document.getElementById('joinBtn');
 const homeError = document.getElementById('homeError');
 const backendHint = document.getElementById('backendHint');
+const appVersion = document.getElementById('appVersion');
 
 function showError(msg) {
   homeError.hidden = !msg;
@@ -18,12 +20,16 @@ function backendLabel(backend) {
   return backend === 'firebase' ? 'Firebase' : 'FastAPI WSS';
 }
 
-getConfiguredBackend()
-  .then((backend) => {
-    backendHint.textContent = backendLabel(backend);
+loadConfig()
+  .then((cfg) => {
+    backendHint.textContent = backendLabel(cfg.backend);
+    const short = formatDisplayVersion(cfg.assetVersion);
+    appVersion.textContent = short || '—';
+    appVersion.title = cfg.assetVersion || '';
   })
   .catch(() => {
     backendHint.textContent = '未知';
+    appVersion.textContent = '—';
   });
 
 createBtn.addEventListener('click', async () => {

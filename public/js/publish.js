@@ -8,7 +8,8 @@ import {
   MiBandBle,
 } from './ble.js';
 import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
-import { createTransport, getConfiguredBackend } from './transport/index.js';
+import { formatDisplayVersion, loadConfig } from './config.js';
+import { createTransport } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
 const qs = parseQuery();
@@ -18,6 +19,7 @@ const name = qs.get('name') || '匿名';
 const el = {
   roomCode: document.getElementById('roomCode'),
   backendLabel: document.getElementById('backendLabel'),
+  appVersion: document.getElementById('appVersion'),
   roomStatus: document.getElementById('roomStatus'),
   bleStatus: document.getElementById('bleStatus'),
   bpm: document.getElementById('bpm'),
@@ -282,8 +284,11 @@ window.addEventListener('beforeunload', () => {
 });
 
 async function init() {
-  const backend = await getConfiguredBackend();
-  el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
+  const cfg = await loadConfig();
+  el.backendLabel.textContent = cfg.backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
+  const short = formatDisplayVersion(cfg.assetVersion);
+  el.appVersion.textContent = short || '—';
+  el.appVersion.title = cfg.assetVersion || '';
   if (!room) return;
 
   setStatus(el.roomStatus, 'connecting', '加入房間中…');

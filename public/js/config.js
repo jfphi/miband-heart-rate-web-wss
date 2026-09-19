@@ -1,5 +1,13 @@
 let cached = null;
 
+export const DISPLAY_VERSION_LENGTH = 6;
+
+/** Short stamp for UI, e.g. `710a0b`. Cache-busting still uses the full assetVersion. */
+export function formatDisplayVersion(raw, length = DISPLAY_VERSION_LENGTH) {
+  const v = String(raw || '').trim().toLowerCase();
+  return v ? v.slice(0, Math.max(1, length)) : '';
+}
+
 function toFrontendConfig(payload) {
   const backend =
     payload.backend === 'firebase' || payload.backend === 'wss'
@@ -38,6 +46,7 @@ export async function loadConfig() {
     cached = {
       backend: 'wss',
       wsUrl: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
+      assetVersion: '',
       firebase: {},
     };
     return cached;

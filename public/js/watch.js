@@ -4,7 +4,8 @@ import {
   createRenderScheduler,
   publisherStructureKey,
 } from './render-scheduler.js';
-import { createTransport, getConfiguredBackend } from './transport/index.js';
+import { formatDisplayVersion, loadConfig } from './config.js';
+import { createTransport } from './transport/index.js';
 import {
   formatAge,
   getOrCreateClientId,
@@ -19,6 +20,7 @@ const name = qs.get('name') || '觀眾';
 const el = {
   roomCode: document.getElementById('roomCode'),
   backendLabel: document.getElementById('backendLabel'),
+  appVersion: document.getElementById('appVersion'),
   roomStatus: document.getElementById('roomStatus'),
   viewerName: document.getElementById('viewerName'),
   cards: document.getElementById('cards'),
@@ -151,8 +153,11 @@ const scheduler = createRenderScheduler({
 });
 
 async function init() {
-  const backend = await getConfiguredBackend();
-  el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
+  const cfg = await loadConfig();
+  el.backendLabel.textContent = cfg.backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
+  const short = formatDisplayVersion(cfg.assetVersion);
+  el.appVersion.textContent = short || '—';
+  el.appVersion.title = cfg.assetVersion || '';
 
   if (!room) {
     showError('缺少房間碼');

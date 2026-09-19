@@ -27,6 +27,11 @@ class AssetVersionTests(unittest.TestCase):
         self.assertTrue(cfg["assetVersion"])
         self.assertLessEqual(len(cfg["assetVersion"]), 16)
 
+    def test_pages_include_version_placeholder(self) -> None:
+        for name in ("index.html", "publish.html", "watch.html"):
+            html = (Path("public") / name).read_text(encoding="utf-8")
+            self.assertIn('id="appVersion"', html)
+
     def test_html_is_not_stored_in_browser_cache(self) -> None:
         html = Path("public/index.html")
         self.assertEqual(static_cache_headers(html)["Cache-Control"], "no-store")
