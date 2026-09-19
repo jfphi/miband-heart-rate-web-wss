@@ -68,6 +68,9 @@
         </p>
       </section>
     </main>
-    <script type="module" src="./js/publish.js"></script>
+    <script type="module">
+      const { bootPage } = await import(`./js/asset-refresh.js?t=${Date.now()}`);
+      await bootPage('./js/publish.js');
+    </script>
   </body>
 </html>

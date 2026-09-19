@@ -1,0 +1,14 @@
+/
+  Cache-Control: no-store
+
+/*.html
+  Cache-Control: no-store
+
+/js/config.generated.js
+  Cache-Control: no-store
+
+/js/*.js
+  Cache-Control: no-cache
+
+/css/*
+  Cache-Control: no-cache

@@ -18,6 +18,7 @@ def main() -> None:
     frontend = {
         "backend": "firebase" if cfg["backend"] == "firebase" else "wss",
         "wsUrl": cfg["wsUrl"],
+        "assetVersion": cfg.get("assetVersion") or "",
         "firebase": cfg["firebase"],
     }
     out = ROOT / "public" / "js" / "config.generated.js"

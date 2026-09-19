@@ -38,6 +38,9 @@
         <p id="error" class="error" hidden></p>
       </section>
     </main>
-    <script type="module" src="./js/watch.js"></script>
+    <script type="module">
+      const { bootPage } = await import(`./js/asset-refresh.js?t=${Date.now()}`);
+      await bootPage('./js/watch.js');
+    </script>
   </body>
 </html>

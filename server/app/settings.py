@@ -21,11 +21,14 @@ def normalize_backend(value: str | None) -> str:
 
 
 def get_public_config() -> dict:
+    from .version import public_asset_version
+
     backend = normalize_backend(os.getenv("MIBAND_BACKEND"))
     ws_url = (os.getenv("MIBAND_WS_URL") or "").strip()
     return {
         "backend": backend,
         "wsUrl": ws_url,
+        "assetVersion": public_asset_version(),
         "firebase": {
             "apiKey": (os.getenv("MIBAND_FIREBASE_API_KEY") or "").strip(),
             "authDomain": (os.getenv("MIBAND_FIREBASE_AUTH_DOMAIN") or "").strip(),

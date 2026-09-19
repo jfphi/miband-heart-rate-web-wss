@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .protocol import error_message, hr_message, member_public, mic_message
 from .rooms import Room, RoomFullError, RoomManager
@@ -64,6 +64,15 @@ async def _broadcast_leave(
     )
 
 
+def static_cache_headers(path: Path) -> dict[str, str]:
+    suffix = path.suffix.lower()
+    if suffix in {".html", ""}:
+        return {"Cache-Control": "no-store"}
+    if suffix in {".js", ".css"}:
+        return {"Cache-Control": "no-cache"}
+    return {}
+
+
 def _safe_public_file(rel_path: str) -> Path | None:
     if not PUBLIC_DIR.is_dir():
         return None
@@ -95,9 +104,12 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/api/config")
-    async def public_config() -> dict:
+    async def public_config() -> JSONResponse:
         """前端用的公開設定（來源：.env 的 MIBAND_*）。"""
-        return get_public_config()
+        return JSONResponse(
+            get_public_config(),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -276,7 +288,7 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
         target = _safe_public_file("index.html")
         if not target:
             raise HTTPException(status_code=404, detail="index.html not found")
-        return FileResponse(target)
+        return FileResponse(target, headers=static_cache_headers(target))
 
     @app.get("/{file_path:path}")
     async def static_file(file_path: str) -> Response:
@@ -286,7 +298,9 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
         if not target:
             raise HTTPException(status_code=404, detail="Not Found")
         media_type, _ = mimetypes.guess_type(str(target))
-        return FileResponse(target, media_type=media_type)
+        return FileResponse(
+            target, media_type=media_type, headers=static_cache_headers(target)
+        )
 
     return app
 

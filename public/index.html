@@ -50,6 +50,9 @@
         <span id="backendHint">讀取中…</span>
       </p>
     </main>
-    <script type="module" src="./js/app-home.js"></script>
+    <script type="module">
+      const { bootPage } = await import(`./js/asset-refresh.js?t=${Date.now()}`);
+      await bootPage('./js/app-home.js');
+    </script>
   </body>
 </html>

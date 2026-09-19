@@ -11,6 +11,7 @@ function toFrontendConfig(payload) {
   return {
     backend,
     wsUrl: payload.wsUrl || '',
+    assetVersion: payload.assetVersion || '',
     firebase: payload.firebase || {},
   };
 }
