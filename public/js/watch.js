@@ -1,5 +1,9 @@
 import { dbToMeterPercent, formatMicAge } from './audio/micThrottle.js';
 import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
+import {
+  createRenderScheduler,
+  publisherStructureKey,
+} from './render-scheduler.js';
 import { createTransport, getConfiguredBackend } from './transport/index.js';
 import {
   formatAge,
@@ -26,6 +30,7 @@ el.roomCode.textContent = room || '------';
 el.viewerName.textContent = `你是：${name}`;
 
 let members = [];
+let structureKey = publisherStructureKey([]);
 /** @type {Map<string, { t: number, bpm: number }[]>} */
 const hrHistory = new Map();
 /** @type {Map<string, { t: number, bpm: number }[]>} */
@@ -140,6 +145,11 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;');
 }
 
+const scheduler = createRenderScheduler({
+  paint: render,
+  minIntervalMs: 1000,
+});
+
 async function init() {
   const backend = await getConfiguredBackend();
   el.backendLabel.textContent = backend === 'firebase' ? 'Firebase RTDB' : 'FastAPI WSS';
@@ -162,7 +172,10 @@ async function init() {
         onRoster: (list) => {
           members = list;
           syncHistory(list);
-          render();
+          const nextKey = publisherStructureKey(list);
+          const structural = nextKey !== structureKey;
+          structureKey = nextKey;
+          scheduler.request({ immediate: structural });
         },
         onStatus: (kind, text) => {
           if (kind === 'replaced') {
@@ -194,10 +207,11 @@ async function init() {
     });
 
   window.addEventListener('beforeunload', () => {
+    scheduler.stop();
     transport?.leaveRoom();
   });
 
-  setInterval(render, 1000);
+  scheduler.startClock(1000);
 }
 
 init();
