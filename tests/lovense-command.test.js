@@ -1,25 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { createCommandQueue, planToyCommand } from '../public/js/lovense-command.js';
+import { buildPatternPlan, createCommandQueue, planToyCommand } from '../public/js/lovense-command.js';
 
 describe('planToyCommand', () => {
   it('vibrates on a new strength', () => {
-    expect(planToyCommand(null, 5)).toEqual({ action: 'vibrate', level: 5 });
-    expect(planToyCommand(5, 8.4)).toEqual({ action: 'vibrate', level: 8 });
+    expect(planToyCommand(null, 5)).toEqual({ action: 'vibrate', level: 5, toyId: null });
+    expect(planToyCommand(5, 8.4)).toEqual({ action: 'vibrate', level: 8, toyId: null });
   });
 
   it('skips an unchanged strength', () => {
-    expect(planToyCommand(5, 5)).toEqual({ action: 'skip', level: 5 });
-    expect(planToyCommand(0, 0)).toEqual({ action: 'skip', level: 0 });
+    expect(planToyCommand(5, 5)).toEqual({ action: 'skip', level: 5, toyId: null });
+    expect(planToyCommand(0, 0)).toEqual({ action: 'skip', level: 0, toyId: null });
   });
 
   it('stops at zero', () => {
-    expect(planToyCommand(4, 0)).toEqual({ action: 'stop', level: 0 });
-    expect(planToyCommand(null, 0)).toEqual({ action: 'stop', level: 0 });
+    expect(planToyCommand(4, 0)).toEqual({ action: 'stop', level: 0, toyId: null });
+    expect(planToyCommand(null, 0)).toEqual({ action: 'stop', level: 0, toyId: null });
   });
 
-  it('clamps to 0-20', () => {
-    expect(planToyCommand(null, 99)).toEqual({ action: 'vibrate', level: 20 });
-    expect(planToyCommand(null, -3)).toEqual({ action: 'stop', level: 0 });
+  it('clamps to 0-20 and keeps a toy id', () => {
+    expect(planToyCommand(null, 99, 'edge')).toEqual({ action: 'vibrate', level: 20, toyId: 'edge' });
+    expect(planToyCommand(null, -3)).toEqual({ action: 'stop', level: 0, toyId: null });
+  });
+});
+
+describe('buildPatternPlan', () => {
+  it('joins strengths and refuses intervals of 100ms or less', () => {
+    expect(buildPatternPlan([1, 20.4, 3], 50, 'toy')).toEqual({
+      action: 'pattern',
+      level: 3,
+      strength: '1;20;3',
+      interval: 101,
+      time: 0,
+      toyId: 'toy',
+      points: [1, 20, 3],
+    });
   });
 });
 
@@ -32,7 +46,7 @@ describe('createCommandQueue', () => {
       return new Promise((resolve) => {
         release = resolve;
       });
-    });
+    }, { minIntervalMs: 0 });
 
     const done = queue.push(5);
     queue.push(8);
@@ -51,9 +65,49 @@ describe('createCommandQueue', () => {
     const sent = [];
     const queue = createCommandQueue(async (plan) => {
       sent.push(plan.level);
-    });
+    }, { minIntervalMs: 0 });
     await queue.push(4);
     await queue.push(4);
     expect(sent).toEqual([4]);
+  });
+
+  it('waits out the minimum gap before the next command', async () => {
+    let t = 0;
+    const waits = [];
+    const sent = [];
+    const queue = createCommandQueue(async (plan) => {
+      sent.push(plan.level);
+    }, {
+      minIntervalMs: 100,
+      now: () => t,
+      delay: async (ms) => {
+        waits.push(ms);
+        t += ms;
+      },
+    });
+
+    await queue.push(1);
+    t = 40;
+    await queue.push(2);
+    expect(sent).toEqual([1, 2]);
+    expect(waits).toEqual([60]);
+  });
+
+  it('passes a pattern plan through with its toy id', async () => {
+    const sent = [];
+    const queue = createCommandQueue(async (plan) => {
+      sent.push(plan);
+    }, { minIntervalMs: 0 });
+    await queue.pushPlan({
+      action: 'pattern',
+      level: 4,
+      strength: '4;8',
+      interval: 150,
+      time: 0,
+      toyId: 'abc',
+    });
+    expect(sent[0].toyId).toBe('abc');
+    expect(sent[0].strength).toBe('4;8');
+    expect(queue.lastSent).toBeNull();
   });
 });

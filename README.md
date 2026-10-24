@@ -18,7 +18,7 @@
 - 佩戴狀態可為未知（`contact: null`，不會被當成未接觸）
 - 麥克風只同步音量 dBFS，不錄音、不傳聲音
 - 同房間被新分頁取代時，舊連線立即停止手環與麥克風
-- 可選：發布頁與監看頁的手動震動滑桿（0–20）。只控制這台瀏覽器用 Lovense Remote 授權的玩具，不進房間、不跟心率連動。三個 `LOVENSE_*` 沒設齊時，這塊面板不會出現
+- 可選：發布頁與監看頁的 Remote 風格控制（波形、圓鈕、Float / Loop / Traditional / Local Sync，強度 0–20）。只控制這台瀏覽器用 Lovense Remote 授權的玩具，不進房間、不跟心率連動。三個 `LOVENSE_*` 沒設齊時，這塊面板不會出現
 
 ## 手環設定
 
@@ -50,7 +50,7 @@ MIBAND_BACKEND=fastapi_wss
 # LOVENSE_SESSION_SECRET=
 ```
 
-`LOVENSE_PLATFORM` 必須和 Lovense 開發者後台的 Website Name 一致。滑桿要用 FastAPI 同源頁面（本機或 Render）；Cloudflare Pages 純靜態沒有換票接口，面板會維持隱藏。
+`LOVENSE_PLATFORM` 必須和 Lovense 開發者後台的 Website Name 一致。玩具控制要用 FastAPI 同源頁面（本機或 Render）；Cloudflare Pages 純靜態沒有換票接口，面板會維持隱藏。
 
 FastAPI 會透過 `GET /api/config` 把上述公開設定交給前端。
 
@@ -133,7 +133,7 @@ Repo 已是 public。兩種做法擇一即可，**都不必**自己建 Docker �
    - Region：Singapore
    - Health Check Path：`/api/health`
    - 環境變數：`PYTHON_VERSION=3.12`、`MIBAND_BACKEND=fastapi_wss`
-   - 要用滑桿時再加 `LOVENSE_DEVELOPER_TOKEN`、`LOVENSE_PLATFORM`、`LOVENSE_SESSION_SECRET`（不要提交到 git）
+   - 要用玩具控制時再加 `LOVENSE_DEVELOPER_TOKEN`、`LOVENSE_PLATFORM`、`LOVENSE_SESSION_SECRET`（不要提交到 git）
 
 4. 部署完成後網址形如 `https://xxx.onrender.com`。發布端請用 **Chrome / Edge**（Web Bluetooth 需要 HTTPS，Render 已提供）。
 5. 驗證：`/api/health` 應回 `{ "status": "ok" }`，再建立房間並確認監看端能收到心率。

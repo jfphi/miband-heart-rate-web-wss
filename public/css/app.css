@@ -461,29 +461,191 @@ button.active {
   font-size: 1.15rem;
 }
 
-.lovense-slider-wrap {
+.lovense-remote {
+  width: min(400px, 100%);
+  min-height: 640px;
+  margin: 16px auto 0;
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 16px;
+  flex-direction: column;
+  background: #050505;
+  border-radius: 28px;
+  overflow: hidden;
+  color: #fff;
+  user-select: none;
+  touch-action: none;
 }
 
-.lovense-slider {
+.lovense-remote[hidden] {
+  display: none;
+}
+
+.remote-top {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
+  min-height: 64px;
+  padding: 10px 14px 0;
+}
+
+.lovense-remote .remote-back {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.remote-titleblock {
+  text-align: center;
+}
+
+.remote-heading {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.remote-clock {
+  color: #8e8e96;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-pill {
+  justify-self: end;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1.5px solid #ff3d8e;
+  color: #ff3d8e;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+}
+
+.remote-wave {
+  display: block;
+  width: 100%;
+  height: 38%;
+  min-height: 210px;
+  flex: 0 0 38%;
+}
+
+.remote-count {
+  margin: 8px 0 0;
+  text-align: center;
+  color: #8e8e96;
+  font-size: 0.82rem;
+}
+
+.remote-body {
+  display: flex;
+  flex: 1;
+  min-height: 250px;
+  padding: 8px 6px 18px 8px;
+}
+
+.remote-lanes {
+  display: flex;
+  flex: 1;
+  justify-content: space-evenly;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.remote-lane {
+  position: relative;
+  width: 110px;
+  touch-action: none;
+}
+
+.remote-knob {
+  position: absolute;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translate(-50%, -50%);
+}
+
+.lovense-remote .remote-orb {
+  width: 84px;
+  height: 84px;
+  padding: 0;
+  border: 2px solid #ff3d8e;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, #1a1a1a, #050505 70%);
+  color: #ff3d8e;
+  display: grid;
+  place-items: center;
+}
+
+.lovense-remote .remote-orb svg,
+.lovense-remote .remote-mode svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.remote-orb-name {
+  margin-top: 6px;
+  color: #f2f2f2;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.lovense-remote .remote-slider {
   width: 36px;
-  height: 220px;
-  margin: 0;
+  height: 200px;
+  margin: 24px auto 0;
   padding: 0;
   border: 0;
   background: transparent;
   writing-mode: vertical-lr;
   direction: rtl;
-  accent-color: var(--accent);
+  display: block;
 }
 
-.lovense-level {
-  font-family: var(--font-mono);
-  font-size: 2rem;
-  font-weight: 750;
+.remote-modes {
+  width: 78px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+}
+
+.lovense-remote .remote-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #8e8e96;
+  font-size: 0.62rem;
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.lovense-remote .remote-mode.is-on {
+  color: #ff3d8e;
+}
+
+.lovense-remote .remote-mode:disabled {
+  opacity: 0.35;
 }
 
 .lovense-qr {
