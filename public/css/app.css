@@ -163,23 +163,9 @@ button.active {
 .bpm {
   font-size: clamp(3.5rem, 12vw, 5.5rem);
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   margin: 8px 0;
-}
-
-.bpm.pulse {
-  animation: pulse 0.45s ease;
-}
-
-@keyframes pulse {
-  from {
-    transform: scale(1.08);
-    color: #ff8fa3;
-  }
-  to {
-    transform: scale(1);
-    color: var(--text);
-  }
 }
 
 .status {

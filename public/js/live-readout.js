@@ -21,15 +21,6 @@ function contactText(contact) {
   return '佩戴狀態：未知';
 }
 
-function restartPulse(node) {
-  node.classList.remove('pulse');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      node.classList.add('pulse');
-    });
-  });
-}
-
 /**
  * The publish-page sensor block. Watch mounts the same block for one person.
  * @param {HTMLElement} root
@@ -82,8 +73,6 @@ export function mountLiveReadout(root, options = {}) {
   let hrPoints = [];
   /** @type {{ t: number, db: number }[]} */
   let levelPoints = [];
-  /** @type {number | null} */
-  let lastBpm = null;
   /** @type {number | null} */
   let liveDb = null;
   /** @type {{ db: number, releaseAt: number } | null} */
@@ -215,25 +204,15 @@ export function mountLiveReadout(root, options = {}) {
       const value = Number(bpm);
       hrPoints = pushHrSample(hrPoints, value, t);
       bpmEl.textContent = String(value);
-      if (lastBpm !== value) {
-        lastBpm = value;
-        restartPulse(bpmEl);
-      }
     },
 
     setHrSeries(points, bpm) {
       hrPoints = points || [];
       if (bpm == null || !Number.isFinite(Number(bpm))) {
-        lastBpm = null;
         bpmEl.textContent = '--';
-        bpmEl.classList.remove('pulse');
         return;
       }
-      const value = Number(bpm);
-      const changed = lastBpm !== value;
-      lastBpm = value;
-      bpmEl.textContent = String(value);
-      if (changed) restartPulse(bpmEl);
+      bpmEl.textContent = String(Number(bpm));
     },
 
     pushLevel(db, t = Date.now()) {
@@ -248,9 +227,7 @@ export function mountLiveReadout(root, options = {}) {
 
     clearHr() {
       hrPoints = [];
-      lastBpm = null;
       bpmEl.textContent = '--';
-      bpmEl.classList.remove('pulse');
       contactEl.textContent = '佩戴狀態：—';
     },
 
