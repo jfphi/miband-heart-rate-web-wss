@@ -6,10 +6,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
+from .lovense import (
+    COOKIE_MAX_AGE,
+    COOKIE_NAME,
+    LovenseTokenError,
+    issue_session,
+    lovense_settings,
+)
 from .protocol import error_message, hr_message, member_public, mic_message
 from .rooms import Room, RoomFullError, RoomManager
 from .settings import get_public_config
@@ -110,6 +117,30 @@ def create_app(room_manager: RoomManager | None = None) -> FastAPI:
             get_public_config(),
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/api/lovense/status")
+    async def lovense_status() -> dict[str, bool]:
+        return {"enabled": lovense_settings() is not None}
+
+    @app.post("/api/lovense/session")
+    async def lovense_session(request: Request) -> JSONResponse:
+        if lovense_settings() is None:
+            raise HTTPException(status_code=404, detail="Not Found")
+        try:
+            body, signed = issue_session(request.cookies.get(COOKIE_NAME))
+        except LovenseTokenError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        response = JSONResponse(body, headers={"Cache-Control": "no-store"})
+        response.set_cookie(
+            COOKIE_NAME,
+            signed,
+            max_age=COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+        return response
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:

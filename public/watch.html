@@ -42,6 +42,36 @@
         <p id="empty" class="hint">尚無發布者，等待有人連接手環或開啟麥克風…</p>
         <p id="error" class="error" hidden></p>
       </section>
+
+      <section class="panel lovense-panel" id="lovensePanel" hidden>
+        <h2>玩具控制</h2>
+        <div class="row">
+          <span class="status idle" id="lovenseStatus">尚未連接</span>
+        </div>
+        <p class="hint">只控制這台瀏覽器授權的玩具，不會同步到房間。</p>
+        <div class="row">
+          <button id="lovenseConnect" type="button">連接玩具</button>
+          <button id="lovenseOpenApp" class="secondary" type="button" hidden disabled>打開 App</button>
+          <button id="lovenseDisconnect" class="secondary" type="button" disabled>斷線</button>
+        </div>
+        <img id="lovenseQr" class="lovense-qr" alt="Lovense 授權 QR code" hidden />
+        <p class="meta" id="lovenseToys" hidden></p>
+        <div class="lovense-slider-wrap">
+          <input
+            id="lovenseSlider"
+            class="lovense-slider"
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            value="0"
+            disabled
+            aria-label="震動強度"
+          />
+          <output id="lovenseLevel" class="lovense-level" for="lovenseSlider">0</output>
+        </div>
+        <p id="lovenseError" class="error" hidden></p>
+      </section>
     </main>
     <script type="module">
       const { bootPage } = await import(`./js/asset-refresh.js?t=${Date.now()}`);

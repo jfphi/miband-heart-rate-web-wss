@@ -13,3 +13,9 @@ services:
         value: "3.12"
       - key: MIBAND_BACKEND
         value: fastapi_wss
+      - key: LOVENSE_DEVELOPER_TOKEN
+        sync: false
+      - key: LOVENSE_PLATFORM
+        sync: false
+      - key: LOVENSE_SESSION_SECRET
+        sync: false

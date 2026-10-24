@@ -8,6 +8,7 @@ import {
 } from './ble.js';
 import { formatDisplayVersion, loadConfig } from './config.js';
 import { mountLiveReadout } from './live-readout.js';
+import { mountLovensePanel } from './lovense-panel.js';
 import { createTransport } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
@@ -328,4 +329,5 @@ async function init() {
   }
 }
 
+mountLovensePanel(document.getElementById('lovensePanel'));
 init();

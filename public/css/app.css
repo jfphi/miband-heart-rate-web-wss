@@ -423,3 +423,45 @@ button.active {
 .card .mic-meter {
   margin-top: 8px;
 }
+
+.lovense-panel {
+  margin-top: 16px;
+}
+
+.lovense-panel h2 {
+  margin: 0 0 12px;
+  font-size: 1.15rem;
+}
+
+.lovense-slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.lovense-slider {
+  width: 36px;
+  height: 220px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  accent-color: var(--accent);
+}
+
+.lovense-level {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 750;
+}
+
+.lovense-qr {
+  width: 180px;
+  height: 180px;
+  margin-top: 12px;
+  background: #fff;
+  border-radius: 12px;
+}

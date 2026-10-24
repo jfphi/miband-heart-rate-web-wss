@@ -2,6 +2,7 @@ import { dbToWaveAmp, meterZone, pushLevelSample } from './audio/waveform.js';
 import { formatDisplayVersion, loadConfig } from './config.js';
 import { pushHrSample } from './hr-chart.js';
 import { chooseFocus, mountLiveReadout } from './live-readout.js';
+import { mountLovensePanel } from './lovense-panel.js';
 import { createTransport } from './transport/index.js';
 import {
   getOrCreateClientId,
@@ -221,4 +222,5 @@ async function init() {
   });
 }
 
+mountLovensePanel(document.getElementById('lovensePanel'));
 init();
