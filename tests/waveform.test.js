@@ -8,8 +8,9 @@ import {
   WAVE_WINDOW_MS,
   waveTickLabels,
   waveformColumns,
+  waveformLayout,
 } from '../public/js/audio/waveform.js';
-import { chooseFocus } from '../public/js/live-readout.js';
+import { beatPeriodMs, chooseFocus } from '../public/js/live-readout.js';
 
 describe('dbToWaveAmp', () => {
   it('treats -60 and below as silence and -6 and above as full', () => {
@@ -34,7 +35,7 @@ describe('meterZone', () => {
 });
 
 describe('waveformColumns', () => {
-  it('holds the previous peak until the latest sample and leaves the rest empty', () => {
+  it('holds the latest level through the rest of the window', () => {
     const now = 12_000;
     const amps = waveformColumns(
       [
@@ -48,8 +49,8 @@ describe('waveformColumns', () => {
     expect(amps).toHaveLength(4);
     expect(amps[0]).toBe(0);
     expect(amps[1]).toBe(1);
-    expect(amps[2]).toBe(0);
-    expect(amps[3]).toBe(0);
+    expect(amps[2]).toBe(1);
+    expect(amps[3]).toBe(1);
   });
 
   it('uses the loudest sample inside a column', () => {
@@ -64,6 +65,36 @@ describe('waveformColumns', () => {
       WAVE_WINDOW_MS,
     );
     expect(amps[0]).toBe(1);
+  });
+});
+
+describe('waveformLayout', () => {
+  it('holds the latest level up to now and parks the playhead on the right edge', () => {
+    const now = 12_000;
+    const layout = waveformLayout([{ t: 3_000, db: -6 }], now, 300, 4, WAVE_WINDOW_MS);
+    const after = layout.bars.filter((bar) => bar.t >= 3_000);
+    expect(after.length).toBeGreaterThan(0);
+    expect(after.every((bar) => bar.amp === 1)).toBe(true);
+    expect(layout.playheadX).toBe(300);
+  });
+
+  it('slides a bar left by the elapsed fraction of the window', () => {
+    const samples = [
+      { t: 0, db: -6 },
+      { t: 3_000, db: -20 },
+    ];
+    const width = 300;
+    const first = waveformLayout(samples, 12_000, width, 4, WAVE_WINDOW_MS);
+    const next = waveformLayout(samples, 12_016, width, 4, WAVE_WINDOW_MS);
+    const barA = first.bars.find((bar) => bar.t === 3_000);
+    const barB = next.bars.find((bar) => bar.t === 3_000);
+    expect(barA).toBeTruthy();
+    expect(barB).toBeTruthy();
+    expect(barB.x).toBeCloseTo(barA.x - (16 / WAVE_WINDOW_MS) * width);
+  });
+
+  it('omits the playhead when nothing is in the window', () => {
+    expect(waveformLayout([], 12_000, 300, 4).playheadX).toBeNull();
   });
 });
 
@@ -106,6 +137,16 @@ describe('pushLevelSample', () => {
       { t: 1_000, db: -20 },
       { t: 1_050, db: -20 },
     ]);
+  });
+});
+
+describe('beatPeriodMs', () => {
+  it('follows the heart rate and ignores values outside 30–250', () => {
+    expect(beatPeriodMs(60)).toBe(1000);
+    expect(beatPeriodMs(120)).toBe(500);
+    expect(beatPeriodMs(29)).toBeNull();
+    expect(beatPeriodMs(251)).toBeNull();
+    expect(beatPeriodMs(null)).toBeNull();
   });
 });
 

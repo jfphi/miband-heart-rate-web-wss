@@ -4,12 +4,18 @@ import {
   dbToWaveAmp,
   drawWaveform,
   meterZone,
-  playheadRatio,
   pushLevelSample,
   WAVE_WINDOW_MS,
   waveTickLabels,
-  waveformColumns,
+  waveformLayout,
 } from './audio/waveform.js';
+
+/** Pulse period for a real BPM, or null when the number should stay still. */
+export function beatPeriodMs(bpm) {
+  const value = Number(bpm);
+  if (!Number.isFinite(value) || value < 30 || value > 250) return null;
+  return 60000 / value;
+}
 
 const CHART_W = 640;
 const CHART_H = 64;
@@ -74,6 +80,15 @@ export function mountLiveReadout(root, options = {}) {
   /** @type {{ t: number, db: number }[]} */
   let levelPoints = [];
   /** @type {number | null} */
+  let lastBpm = null;
+  let stale = false;
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let beatTimer = null;
+  /** @type {number | null} */
+  let beatBpm = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let changeTimer = null;
+  /** @type {number | null} */
   let liveDb = null;
   /** @type {{ db: number, releaseAt: number } | null} */
   let peakState = null;
@@ -111,12 +126,14 @@ export function mountLiveReadout(root, options = {}) {
       ...tick,
       showLabel: index % labelEvery === 0,
     }));
+    const wave = waveformLayout(levelPoints, now, cssW, count);
     drawWaveform(ctx, {
       width: cssW,
       height: WAVE_H,
       waveH: WAVE_H - 16,
-      amps: waveformColumns(levelPoints, now, count),
-      playhead: playheadRatio(levelPoints, now),
+      bars: wave.bars,
+      slot: wave.slot,
+      playheadX: wave.playheadX,
       ticks,
       now,
       windowMs: WAVE_WINDOW_MS,
@@ -159,6 +176,64 @@ export function mountLiveReadout(root, options = {}) {
     fillEl.className = `mic-meter-fill zone-${meterZone(value)}`;
   }
 
+  function stopBeat() {
+    if (beatTimer != null) {
+      clearInterval(beatTimer);
+      beatTimer = null;
+    }
+    beatBpm = null;
+    bpmEl.classList.remove('is-beat');
+  }
+
+  function armBeat(bpm) {
+    const period = beatPeriodMs(bpm);
+    if (period == null) {
+      stopBeat();
+      return;
+    }
+    if (beatTimer != null && beatBpm === bpm) return;
+    stopBeat();
+    beatBpm = bpm;
+    beatTimer = setInterval(() => {
+      if (bpmEl.classList.contains('is-changing')) return;
+      bpmEl.classList.remove('is-beat');
+      void bpmEl.offsetWidth;
+      bpmEl.classList.add('is-beat');
+    }, period);
+  }
+
+  function playChange() {
+    bpmEl.classList.remove('is-beat', 'is-changing');
+    void bpmEl.offsetWidth;
+    bpmEl.classList.add('is-changing');
+    if (changeTimer != null) clearTimeout(changeTimer);
+    changeTimer = setTimeout(() => {
+      bpmEl.classList.remove('is-changing');
+      changeTimer = null;
+    }, 180);
+  }
+
+  function showBpm(value) {
+    const next = Math.round(Number(value));
+    const changed = lastBpm !== next;
+    lastBpm = next;
+    bpmEl.textContent = String(next);
+    if (changed) playChange();
+    if (stale) stopBeat();
+    else armBeat(next);
+  }
+
+  function clearBpmDisplay() {
+    stopBeat();
+    if (changeTimer != null) {
+      clearTimeout(changeTimer);
+      changeTimer = null;
+    }
+    lastBpm = null;
+    bpmEl.textContent = '--';
+    bpmEl.classList.remove('is-changing', 'is-beat');
+  }
+
   frameId = requestAnimationFrame(frame);
 
   return {
@@ -193,7 +268,10 @@ export function mountLiveReadout(root, options = {}) {
     },
 
     setStale(on) {
-      shell.classList.toggle('is-stale', Boolean(on));
+      stale = Boolean(on);
+      shell.classList.toggle('is-stale', stale);
+      if (stale) stopBeat();
+      else if (lastBpm != null) armBeat(lastBpm);
     },
 
     pushHr(bpm, t = Date.now()) {
@@ -201,18 +279,18 @@ export function mountLiveReadout(root, options = {}) {
         this.clearHr();
         return;
       }
-      const value = Number(bpm);
+      const value = Math.round(Number(bpm));
       hrPoints = pushHrSample(hrPoints, value, t);
-      bpmEl.textContent = String(value);
+      showBpm(value);
     },
 
     setHrSeries(points, bpm) {
       hrPoints = points || [];
       if (bpm == null || !Number.isFinite(Number(bpm))) {
-        bpmEl.textContent = '--';
+        clearBpmDisplay();
         return;
       }
-      bpmEl.textContent = String(Number(bpm));
+      showBpm(bpm);
     },
 
     pushLevel(db, t = Date.now()) {
@@ -227,7 +305,7 @@ export function mountLiveReadout(root, options = {}) {
 
     clearHr() {
       hrPoints = [];
-      bpmEl.textContent = '--';
+      clearBpmDisplay();
       contactEl.textContent = '佩戴狀態：—';
     },
 
@@ -240,6 +318,7 @@ export function mountLiveReadout(root, options = {}) {
     destroy() {
       running = false;
       cancelAnimationFrame(frameId);
+      clearBpmDisplay();
     },
   };
 }

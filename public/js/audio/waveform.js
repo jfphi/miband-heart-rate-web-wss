@@ -78,8 +78,26 @@ function latestAtOrBefore(sorted, now) {
 }
 
 /**
- * One amplitude per column. Gaps before the latest sample hold the previous peak.
- * Columns after the latest sample stay empty so the playhead can sit in front of them.
+ * Peak dB inside [start, end), otherwise the level held from earlier.
+ * After the latest sample, keep that level so the wave runs up to now.
+ * @param {{ t: number, db: number }[]} sorted
+ */
+function peakColumn(sorted, start, end, now, latest, held) {
+  if (latest == null || start > now) return { peak: null, held };
+  if (start > latest) return { peak: held, held };
+  let peak = null;
+  for (const sample of sorted) {
+    if (sample.t < start) continue;
+    if (sample.t >= end || sample.t > now) break;
+    peak = peak == null ? sample.db : Math.max(peak, sample.db);
+  }
+  if (peak == null) peak = held;
+  return { peak, held: peak == null ? held : peak };
+}
+
+/**
+ * One amplitude per column, aligned to the window start.
+ * Gaps hold the previous peak through the column that contains now.
  * @returns {number[]}
  */
 export function waveformColumns(samples, now, columnCount, windowMs = WAVE_WINDOW_MS) {
@@ -87,7 +105,7 @@ export function waveformColumns(samples, now, columnCount, windowMs = WAVE_WINDO
   const amps = new Array(count).fill(0);
   const sorted = sortedLevels(samples);
   const latest = latestAtOrBefore(sorted, now);
-  if (latest == null) return amps;
+  if (latest == null || latest < now - windowMs) return amps;
 
   const t0 = now - windowMs;
   const slice = windowMs / count;
@@ -97,25 +115,58 @@ export function waveformColumns(samples, now, columnCount, windowMs = WAVE_WINDO
     else break;
   }
 
-  let index = 0;
   for (let i = 0; i < count; i += 1) {
     const start = t0 + i * slice;
     const end = i === count - 1 ? now + 1 : start + slice;
-    if (start > latest) break;
-    let peak = null;
-    while (index < sorted.length && sorted[index].t < start) index += 1;
-    let j = index;
-    while (j < sorted.length && sorted[j].t < end && sorted[j].t <= now) {
-      peak = peak == null ? sorted[j].db : Math.max(peak, sorted[j].db);
-      j += 1;
-    }
-    if (peak == null) peak = held;
-    if (peak != null) {
-      held = peak;
-      amps[i] = dbToWaveAmp(peak);
-    }
+    const next = peakColumn(sorted, start, end, now, latest, held);
+    held = next.held;
+    if (next.peak != null) amps[i] = dbToWaveAmp(next.peak);
   }
   return amps;
+}
+
+/**
+ * Bars on a fixed time grid, shifted by the fractional column so they glide.
+ * The latest level is held through the column that contains now.
+ * Playhead sits on the right edge while any sample is inside the window.
+ * @returns {{ bars: { x: number, amp: number, t: number }[], playheadX: number | null, slot: number }}
+ */
+export function waveformLayout(samples, now, width, columnCount, windowMs = WAVE_WINDOW_MS) {
+  const count = Math.max(1, columnCount | 0);
+  const w = Math.max(1, Number(width) || 1);
+  const slice = windowMs / count;
+  const slot = w / count;
+  const t0 = now - windowMs;
+  const origin = Math.floor(t0 / slice) * slice;
+  const sorted = sortedLevels(samples);
+  const latest = latestAtOrBefore(sorted, now);
+  /** @type {{ x: number, amp: number, t: number }[]} */
+  const bars = [];
+  if (latest == null || latest < t0) {
+    return { bars, playheadX: null, slot };
+  }
+
+  let held = null;
+  for (const sample of sorted) {
+    if (sample.t < origin) held = sample.db;
+    else break;
+  }
+
+  const lastIndex = Math.floor((now - origin) / slice);
+  for (let i = 0; i <= lastIndex; i += 1) {
+    const start = origin + i * slice;
+    if (start > now) break;
+    const next = peakColumn(sorted, start, start + slice, now, latest, held);
+    held = next.held;
+    if (next.peak == null) continue;
+    bars.push({
+      t: start,
+      x: ((start - t0) / windowMs) * w,
+      amp: dbToWaveAmp(next.peak),
+    });
+  }
+
+  return { bars, playheadX: w, slot };
 }
 
 /** 0–1 across the window, or null when nothing has been drawn yet. */
@@ -144,8 +195,9 @@ export function waveTickLabels(now, windowMs = WAVE_WINDOW_MS, stepMs = WAVE_LAB
  *   width: number,
  *   height: number,
  *   waveH: number,
- *   amps: number[],
- *   playhead: number | null,
+ *   bars?: { x: number, amp: number }[],
+ *   slot?: number,
+ *   playheadX?: number | null,
  *   ticks: { t: number, label: string, showLabel?: boolean }[],
  *   now: number,
  *   windowMs?: number,
@@ -169,21 +221,24 @@ export function drawWaveform(ctx, layout) {
   ctx.lineTo(width, waveH / 2);
   ctx.stroke();
 
-  const amps = layout.amps || [];
-  const slot = width / Math.max(1, amps.length);
+  const bars = layout.bars || [];
+  const slot = layout.slot || width / Math.max(1, bars.length);
   const barW = Math.max(1, slot - 1);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, width, waveH);
+  ctx.clip();
   ctx.fillStyle = 'rgba(241, 250, 238, 0.82)';
-  for (let i = 0; i < amps.length; i += 1) {
-    const amp = amps[i];
-    if (amp <= 0) continue;
-    const barH = Math.max(1, amp * (waveH / 2 - 2));
-    const x = i * slot;
-    const mid = waveH / 2;
-    ctx.fillRect(x, mid - barH, barW, barH * 2);
+  const mid = waveH / 2;
+  for (const bar of bars) {
+    if (bar.amp <= 0) continue;
+    const barH = Math.max(1, bar.amp * (waveH / 2 - 2));
+    ctx.fillRect(bar.x, mid - barH, barW, barH * 2);
   }
+  ctx.restore();
 
-  if (layout.playhead != null) {
-    const x = layout.playhead * width;
+  if (layout.playheadX != null) {
+    const x = Math.min(layout.playheadX, width - 1);
     ctx.strokeStyle = '#48cae4';
     ctx.lineWidth = 2;
     ctx.beginPath();

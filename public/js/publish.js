@@ -96,18 +96,16 @@ function stopMicBucket() {
 async function flushMicBucket() {
   if (bucketDb == null || !allowMicPublish) return;
   const db = bucketDb;
-  bucketDb = null;
   const ts = Date.now();
-  const published = transport?.publishMic?.({ db, ts });
-  if (published && typeof published.then === 'function') {
-    try {
-      if (await published) readout.pushLevel(db, ts);
-    } catch (err) {
-      showError(err.message || String(err));
-    }
+  let published = false;
+  try {
+    const pending = transport?.publishMic?.({ db, ts });
+    published = pending && typeof pending.then === 'function' ? await pending : Boolean(pending);
+  } catch (err) {
+    showError(err.message || String(err));
     return;
   }
-  if (published) readout.pushLevel(db, ts);
+  if (published && bucketDb === db) bucketDb = null;
 }
 
 function startMicBucket() {
@@ -155,6 +153,7 @@ if (!micSupported) {
 const mic = createMicLevel({
   onLevel: (db) => {
     if (!allowMicPublish) return;
+    readout.pushLevel(db, Date.now());
     if (bucketDb == null || db > bucketDb) bucketDb = db;
   },
   onStatus: (status, text) => {

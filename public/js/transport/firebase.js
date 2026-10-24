@@ -69,7 +69,7 @@ export function createFirebaseTransport(cfg) {
       soundUpdatedAt: serverTimestamp(),
       online: true,
     });
-  }, { minIntervalMs: 50, maxSilenceMs: 1000 });
+  }, { minIntervalMs: 50, maxSilenceMs: 50 });
 
   function emitRoster(snapshotVal) {
     if (!onRoster) return;

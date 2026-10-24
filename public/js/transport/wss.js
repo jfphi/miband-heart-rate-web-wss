@@ -74,7 +74,7 @@ export function createWssTransport(cfg) {
       throw new Error('WebSocket 尚未連線');
     }
     ws.send(JSON.stringify({ type: 'mic', db, ts }));
-  }, { minIntervalMs: 50, maxSilenceMs: 1000 });
+  }, { minIntervalMs: 50, maxSilenceMs: 50 });
 
   function clearReconnect() {
     if (reconnectTimer != null) {

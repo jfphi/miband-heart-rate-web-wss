@@ -168,6 +168,34 @@ button.active {
   margin: 8px 0;
 }
 
+.bpm.is-beat {
+  animation: bpm-beat 0.22s ease;
+}
+
+.bpm.is-changing {
+  animation: bpm-change 0.18s ease;
+}
+
+@keyframes bpm-change {
+  from {
+    transform: scale(1.06);
+    color: #ff8fa3;
+  }
+  to {
+    transform: scale(1);
+    color: var(--text);
+  }
+}
+
+@keyframes bpm-beat {
+  from {
+    transform: scale(1.04);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -337,7 +365,7 @@ button.active {
   height: 100%;
   width: 0;
   background: var(--ok);
-  transition: width 0.12s linear;
+  transition: width 30ms linear;
 }
 
 .mic-meter-fill.zone-ok {
