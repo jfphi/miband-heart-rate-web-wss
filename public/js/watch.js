@@ -3,6 +3,8 @@ import { formatDisplayVersion, loadConfig } from './config.js';
 import { pushHrSample } from './hr-chart.js';
 import { chooseFocus, mountLiveReadout } from './live-readout.js';
 import { mountLovensePanel } from './lovense-panel.js';
+import { REMOTE_COLORS, pushWaveSample } from './lovense-wave.js';
+import { mountWaveStage } from './wave-stage.js';
 import { createTransport } from './transport/index.js';
 import {
   getOrCreateClientId,
@@ -29,9 +31,11 @@ const el = {
 el.roomCode.textContent = room || '------';
 el.viewerName.textContent = `你是：${name}`;
 
-const readout = mountLiveReadout(el.live, { showSignal: true });
+const readout = mountLiveReadout(el.live, { showSignal: true, charts: false });
+const stage = mountWaveStage(document.getElementById('waveStage'));
 
 let members = [];
+let transport = null;
 /** @type {string | null} */
 let focusedId = null;
 /** @type {string[]} */
@@ -40,6 +44,57 @@ let previousIds = [];
 const hrHistory = new Map();
 /** @type {Map<string, { t: number, db: number }[]>} */
 const levelHistory = new Map();
+/** @type {Map<string, { name: string, color: string, samples: { t: number, level: number }[] }>} */
+const toySeries = new Map();
+/** @type {any[]} */
+let leases = [];
+let toyColors = 0;
+
+function paintToys() {
+  stage.setToys(
+    Array.from(toySeries.values()).map((line) => ({
+      color: line.color,
+      samples: line.samples,
+    })),
+  );
+}
+
+function noteToy(msg) {
+  if (!msg?.clientId) return;
+  const key = `${msg.clientId}:${msg.toyId || '*'}`;
+  let line = toySeries.get(key);
+  if (!line) {
+    line = {
+      name: msg.name || '玩具',
+      color: REMOTE_COLORS[toyColors % REMOTE_COLORS.length],
+      samples: [],
+    };
+    toyColors += 1;
+    toySeries.set(key, line);
+  }
+  if (msg.name) line.name = msg.name;
+  const now = msg.ts || Date.now();
+  if (msg.cleared) {
+    line.samples = pushWaveSample(line.samples, 0, now, 12_000);
+  } else if (msg.level != null) {
+    line.samples = pushWaveSample(line.samples, Number(msg.level), now, 12_000);
+  }
+  paintToys();
+  panel.applyIncoming(msg);
+}
+
+function noteLease(lease) {
+  if (!lease?.ownerId) return;
+  leases = leases.filter((item) => item.ownerId !== lease.ownerId);
+  if (lease.toys?.length || lease.controllerId) leases.push(lease);
+  if (!lease.controllerId && !(lease.toys || []).length) {
+    for (const key of toySeries.keys()) {
+      if (key.startsWith(`${lease.ownerId}:`)) toySeries.delete(key);
+    }
+    paintToys();
+  }
+  pushContext();
+}
 
 function setStatus(kind, text) {
   el.roomStatus.className = `status ${kind}`;
@@ -144,7 +199,12 @@ function apply() {
   el.empty.hidden = hasPeople;
   el.live.hidden = !hasPeople;
   const member = publishers.find((m) => m.clientId === focusedId);
-  if (!member) return;
+  if (!member) {
+    stage.setHeart([]);
+    stage.setSound([]);
+    pushContext();
+    return;
+  }
   const stale = !member.online || isStale(signalAt(member));
   readout.setName(member.name);
   readout.setContact(member.bpm == null && member.contact == null ? undefined : member.contact);
@@ -156,6 +216,17 @@ function apply() {
     member.db == null ? 'idle' : 'listening',
     member.db == null ? '麥克風未開啟' : '正在量測音量',
   );
+  stage.setHeart(hrHistory.get(member.clientId) || []);
+  stage.setSound(levelHistory.get(member.clientId) || []);
+  pushContext();
+}
+
+function pushContext() {
+  panel.setContext({
+    clientId: getOrCreateClientId(),
+    members,
+    leases,
+  });
 }
 
 async function init() {
@@ -171,7 +242,6 @@ async function init() {
     return;
   }
 
-  let transport = null;
   createTransport()
     .then((t) => {
       transport = t;
@@ -206,6 +276,8 @@ async function init() {
           showError(msg);
           setStatus('error', '連線錯誤');
         },
+        onToy: noteToy,
+        onToyLease: noteLease,
       });
     })
     .catch((err) => {
@@ -218,9 +290,13 @@ async function init() {
   window.addEventListener('beforeunload', () => {
     clearInterval(staleTimer);
     readout.destroy();
+    stage.destroy();
+    panel.destroy?.();
     transport?.leaveRoom();
   });
 }
 
-mountLovensePanel(document.getElementById('lovensePanel'));
+const panel = mountLovensePanel(document.getElementById('lovensePanel'), {
+  getTransport: () => transport,
+});
 init();

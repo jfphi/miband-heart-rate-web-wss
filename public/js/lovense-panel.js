@@ -5,6 +5,7 @@ import {
   levelFromLane,
 } from './lovense-remote.js';
 import { drawRemoteWave } from './lovense-wave.js';
+import { canSendToy, clampGrantSeconds, controlRole, grantVisible } from './toy-control.js';
 
 const SDK_URL = 'https://api.lovense-api.com/basic-sdk/core.min.js';
 
@@ -45,6 +46,16 @@ export function isMobileLovenseBrowser(
   return /Macintosh/i.test(ua) && maxTouchPoints > 1;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
 function toySummary(toys) {
   if (!Array.isArray(toys) || toys.length === 0) return '';
   return toys
@@ -59,23 +70,31 @@ function toySummary(toys) {
 
 /**
  * @param {HTMLElement | null} root
+ * @param {{ getTransport?: () => any }} [hooks]
  */
-export function mountLovensePanel(root) {
-  if (!root) return Promise.resolve();
-  return fetch('/api/lovense/status', { cache: 'no-store', credentials: 'same-origin' })
+export function mountLovensePanel(root, hooks = {}) {
+  const api = {
+    setContext() {},
+    applyIncoming() {},
+  };
+  if (!root) return api;
+  const bound = bindLovensePanel(root, hooks);
+  if (!bound) return api;
+  api.setContext = bound.setContext;
+  api.applyIncoming = bound.applyIncoming;
+  fetch('/api/lovense/status', { cache: 'no-store', credentials: 'same-origin' })
     .then(async (res) => {
       if (!res.ok) return;
       const data = await res.json();
-      if (!data?.enabled) return;
-      root.hidden = false;
-      bindLovensePanel(root);
+      bound.setEnabled(Boolean(data?.enabled));
     })
     .catch(() => {
       /* 沒有這條 API 時維持隱藏，不影響心率頁 */
     });
+  return api;
 }
 
-function bindLovensePanel(root) {
+function bindLovensePanel(root, hooks) {
   const status = root.querySelector('#lovenseStatus');
   const connectBtn = root.querySelector('#lovenseConnect');
   const openAppBtn = root.querySelector('#lovenseOpenApp');
@@ -84,7 +103,9 @@ function bindLovensePanel(root) {
   const toys = root.querySelector('#lovenseToys');
   const remote = root.querySelector('#lovenseRemote');
   const error = root.querySelector('#lovenseError');
-  if (!status || !connectBtn || !disconnectBtn || !remote) return;
+  if (!status || !connectBtn || !disconnectBtn || !remote) return null;
+  connectBtn.hidden = true;
+  disconnectBtn.hidden = true;
 
   if (openAppBtn && isMobileLovenseBrowser()) openAppBtn.hidden = false;
 
@@ -132,6 +153,122 @@ function bindLovensePanel(root) {
   const model = createRemoteModel();
   /** @type {Map<string, ReturnType<typeof createCommandQueue>>} */
   const queues = new Map();
+  const grant = root.querySelector('#toyGrant');
+  let lovenseEnabled = false;
+  let localOwner = false;
+  let members = [];
+  /** @type {any[]} */
+  let leases = [];
+  let clientId = null;
+  /** @type {{ mode: string, lease: any }} */
+  let role = { mode: 'unavailable', lease: null };
+  let relayAt = 0;
+  /** @type {Map<string, number>} */
+  const relayed = new Map();
+  let grantKey = '';
+
+  function transport() {
+    return hooks.getTransport?.() || null;
+  }
+
+  function refreshRole() {
+    const link = transport();
+    const toyControl = link ? Boolean(link.supportsToyControl) : null;
+    role = controlRole({
+      clientId,
+      leases,
+      now: Date.now(),
+      toyControl,
+      localOwner,
+    });
+    const online = members.filter((member) => member && member.online !== false).length;
+    renderGrant(online);
+    remote.classList.toggle('is-locked', role.mode === 'owner-locked');
+    const showShell = lovenseEnabled || grantVisible(role, online);
+    root.hidden = !showShell;
+    if (role.mode === 'controller' && role.lease?.toys?.length) {
+      model.setToys(
+        role.lease.toys.map((toy) => ({ id: toy.id, name: toy.name, connected: true })),
+        Date.now(),
+      );
+      collapsed = false;
+      syncChrome();
+    } else if (!localOwner) {
+      model.setToys([], Date.now());
+      syncChrome();
+    }
+  }
+
+  function renderGrant(online) {
+    if (!grant) return;
+    const visible = grantVisible(role, online);
+    grant.hidden = !visible;
+    if (!visible) {
+      grant.innerHTML = '';
+      grantKey = '';
+      return;
+    }
+    const lease = role.lease;
+    const remain = Math.max(0, Math.ceil(((lease?.expiresAt || 0) - Date.now()) / 1000));
+    const people = members
+      .filter((member) => member && member.online !== false)
+      .map((member) => member.clientId)
+      .join(',');
+    const key = `${role.mode}|${lease?.controllerId || ''}|${lease?.expiresAt || ''}|${online}|${people}|${lovenseEnabled}`;
+    if (key === grantKey) {
+      const clock = grant.querySelector('#toyRemain');
+      if (clock) clock.textContent = String(remain);
+      return;
+    }
+    grantKey = key;
+    if (role.mode === 'unavailable') {
+      grant.innerHTML = '<p class="hint">此後端無法共享玩具控制。</p>';
+      return;
+    }
+    if (role.mode === 'owner-locked' || role.mode === 'controller' || (role.mode === 'spectator' && role.lease)) {
+      const who = lease?.controllerName || '某人';
+      const ownerBit = role.mode === 'owner-locked'
+        ? `<button type="button" id="toyRevoke">收回</button>`
+        : '';
+      grant.innerHTML = `<p class="hint">目前由 ${escapeHtml(who)} 控制，剩餘 <span id="toyRemain">${remain}</span> 秒。</p>${ownerBit}`;
+      grant.querySelector('#toyRevoke')?.addEventListener('click', () => {
+        transport()?.revokeToy?.();
+      });
+      return;
+    }
+    const choices = members
+      .filter((member) => member && member.online !== false && member.clientId !== clientId)
+      .map((member) => `<option value="${escapeHtml(member.clientId)}">${escapeHtml(member.name || '匿名')}</option>`)
+      .join('');
+    grant.innerHTML = `
+      <div class="row">
+        <select id="toyController" aria-label="控制者">${choices}</select>
+        <select id="toySeconds" aria-label="控制時長">
+          <option value="30">30 秒</option>
+          <option value="60">1 分鐘</option>
+          <option value="300">5 分鐘</option>
+          <option value="custom">自訂</option>
+        </select>
+        <input id="toyCustomSeconds" type="number" min="1" max="1800" placeholder="秒" hidden />
+        <button type="button" id="toyGrantBtn">交給他控制</button>
+      </div>
+    `;
+    const seconds = grant.querySelector('#toySeconds');
+    const custom = grant.querySelector('#toyCustomSeconds');
+    seconds?.addEventListener('change', () => {
+      if (custom) custom.hidden = seconds.value !== 'custom';
+    });
+    grant.querySelector('#toyGrantBtn')?.addEventListener('click', () => {
+      const controllerId = grant.querySelector('#toyController')?.value;
+      const picked = seconds?.value === 'custom' ? custom?.value : seconds?.value;
+      const span = clampGrantSeconds(picked);
+      if (!controllerId || span == null) {
+        showError('請選擇成員與 1 到 1800 秒');
+        return;
+      }
+      transport()?.grantToy?.({ controllerId, seconds: span });
+    });
+  }
 
   function queueFor(toyId) {
     const key = toyId || '*';
@@ -302,6 +439,7 @@ function bindLovensePanel(root) {
         slider.style.accentColor = control.color;
         slider.setAttribute('aria-label', `${control.name} 強度`);
         const followSlider = () => {
+          if (role.mode === 'owner-locked') return;
           const now = Date.now();
           const level = Number(slider.value);
           if (model.draggingId() !== control.id) dispatch(model.begin(control.id, level, now));
@@ -341,6 +479,7 @@ function bindLovensePanel(root) {
         knob.append(orb, name);
         lane.append(knob);
         lane.addEventListener('pointerdown', (event) => {
+          if (role.mode === 'owner-locked') return;
           if (event.button !== 0) return;
           event.preventDefault();
           lane.setPointerCapture(event.pointerId);
@@ -358,6 +497,7 @@ function bindLovensePanel(root) {
           dispatch(model.end(control.id, Date.now()));
         });
         orb.addEventListener('keydown', (event) => {
+          if (role.mode === 'owner-locked') return;
           const current = Number(orb.getAttribute('aria-valuenow')) || 0;
           let next = current;
           if (event.key === 'ArrowUp' || event.key === 'ArrowRight') next = Math.min(20, current + 1);
@@ -412,9 +552,25 @@ function bindLovensePanel(root) {
     });
   }
 
+  function relayLevels(view, now) {
+    if (!canSendToy(role)) return;
+    const link = transport();
+    if (!link?.publishToy) return;
+    if (now - relayAt < 50) return;
+    relayAt = now;
+    for (const control of view.controls) {
+      const level = Math.round(control.level);
+      const key = control.id || '*';
+      if (relayed.get(key) === level) continue;
+      relayed.set(key, level);
+      link.publishToy({ toyId: control.id, level, ts: now });
+    }
+  }
+
   function paint(now) {
-    dispatch(model.tick(now));
+    if (role.mode !== 'owner-locked') dispatch(model.tick(now));
     const view = model.view(now);
+    relayLevels(view, now);
     clock.textContent = view.clock;
     pill.textContent = view.pill;
     pill.hidden = !view.pill;
@@ -438,7 +594,13 @@ function bindLovensePanel(root) {
         connected: true,
       }));
     const before = model.view(Date.now()).controls.length;
+    const wasOwner = localOwner;
+    localOwner = online.length > 0;
     model.setToys(online, Date.now());
+    const link = transport();
+    if (online.length) link?.publishToyReady?.(online);
+    else if (wasOwner) link?.clearToy?.();
+    refreshRole();
     const after = model.view(Date.now()).controls.length;
     if (!after) {
       if (before > 0) haltToys();
@@ -522,6 +684,10 @@ function bindLovensePanel(root) {
 
   function disconnect() {
     stopping = true;
+    localOwner = false;
+    relayed.clear();
+    transport()?.clearToy?.();
+    refreshRole();
     window.removeEventListener('pagehide', onPageHide);
     model.stopSession();
     haltToys();
@@ -574,4 +740,45 @@ function bindLovensePanel(root) {
     }
   });
   disconnectBtn.addEventListener('click', disconnect);
+
+  const grantTimer = setInterval(() => {
+    if (document.body.contains(root)) refreshRole();
+  }, 1000);
+
+  return {
+    setEnabled(on) {
+      lovenseEnabled = Boolean(on);
+      connectBtn.hidden = !lovenseEnabled;
+      disconnectBtn.hidden = !lovenseEnabled;
+      refreshRole();
+    },
+    setContext(next) {
+      clientId = next?.clientId || null;
+      members = next?.members || [];
+      leases = next?.leases || [];
+      refreshRole();
+    },
+    applyIncoming(msg) {
+      if (!sdk || !msg || msg.clientId !== clientId) return;
+      if (!msg.cleared && msg.fromId === clientId) return;
+      const level = Number(msg.level);
+      const toyId = msg.toyId || null;
+      try {
+        if (msg.cleared || !Number.isFinite(level) || level <= 0) {
+          if (toyId) sdk.stopToyAction({ toyId });
+          else sdk.stopToyAction();
+          return;
+        }
+        sdk.sendToyCommand({
+          vibrate: level,
+          ...(toyId ? { toyId } : {}),
+        });
+      } catch (err) {
+        showError(err?.message || String(err));
+      }
+    },
+    destroy() {
+      clearInterval(grantTimer);
+    },
+  };
 }

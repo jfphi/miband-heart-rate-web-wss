@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import WebSocket
 
-from .protocol import member_public, session_replaced_message
+from .protocol import member_public, session_replaced_message, toy_lease_message, toy_message
 
 
 OFFLINE_GRACE_SECONDS = 15
@@ -18,6 +18,11 @@ TS_FUTURE_SLACK_MS = 2_000
 TS_PAST_SLACK_MS = 10_000
 MIC_DB_MIN = -100
 MIC_DB_MAX = 0
+TOY_LEVEL_MIN = 0
+TOY_LEVEL_MAX = 20
+TOY_MIN_INTERVAL_MS = 50
+TOY_GRANT_MIN_SECONDS = 1
+TOY_GRANT_MAX_SECONDS = 1800
 
 HrStatus = Literal["ok", "drop", "forbidden", "missing", "stale"]
 
@@ -68,6 +73,7 @@ class Member:
     db: int | None = None
     sound_updated_at: int | None = None
     last_mic_at: int | None = None
+    last_toy_at: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,9 +90,22 @@ class Member:
 
 
 @dataclass
+class ToyLease:
+    owner_id: str
+    owner_name: str
+    controller_id: str
+    controller_name: str
+    expires_at: int
+    toys: list[dict[str, str]]
+
+
+@dataclass
 class Room:
     code: str
     members: dict[str, Member] = field(default_factory=dict)
+    toy_owners: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    leases: dict[str, ToyLease] = field(default_factory=dict)
+    toy_notices: list[dict[str, Any]] = field(default_factory=list)
 
 
 class RoomManager:
@@ -103,6 +122,7 @@ class RoomManager:
         self._max_members = max_members
         self._hr_min_interval_ms = hr_min_interval_ms
         self._mic_min_interval_ms = mic_min_interval_ms
+        self._toy_min_interval_ms = TOY_MIN_INTERVAL_MS
 
     def _live_publisher(
         self,
@@ -197,6 +217,7 @@ class RoomManager:
                 member.contact = None
                 member.db = None
                 member.sound_updated_at = now
+            self._release_toy_for(room, client_id, now)
             self._schedule_removal(code, client_id)
             return room
 
@@ -306,6 +327,288 @@ class RoomManager:
             member.db = None
             member.sound_updated_at = now
             return "ok", room, member
+
+    def _normalize_toys(self, raw: Any) -> list[dict[str, str]]:
+        if not isinstance(raw, list):
+            return []
+        toys: list[dict[str, str]] = []
+        for item in raw[:8]:
+            if not isinstance(item, dict):
+                continue
+            toy_id = str(item.get("id") or "").strip()[:64]
+            if not toy_id:
+                continue
+            name = str(item.get("name") or "Toy").strip()[:32] or "Toy"
+            toys.append({"id": toy_id, "name": name})
+        return toys
+
+    def _lease_message(self, room: Room, owner_id: str) -> dict[str, Any]:
+        owner = room.members.get(owner_id)
+        toys = room.toy_owners.get(owner_id, [])
+        lease = room.leases.get(owner_id)
+        now = int(time.time() * 1000)
+        active = lease is not None and lease.expires_at > now
+        return toy_lease_message(
+            owner_id=owner_id,
+            owner_name=(owner.name if owner else (lease.owner_name if lease else "匿名")),
+            controller_id=lease.controller_id if active else None,
+            controller_name=lease.controller_name if active else None,
+            expires_at=lease.expires_at if active else None,
+            toys=toys,
+        )
+
+    def _stop_messages(self, room: Room, owner_id: str, now: int) -> list[dict[str, Any]]:
+        owner = room.members.get(owner_id)
+        lease = room.leases.get(owner_id)
+        name = owner.name if owner else (lease.owner_name if lease else "匿名")
+        toys = room.toy_owners.get(owner_id) or (lease.toys if lease else [])
+        payload = {"client_id": owner_id, "name": name}
+        ids: list[str | None] = [toy["id"] for toy in toys] or [None]
+        return [
+            toy_message(payload, toy_id=toy_id, level=0, ts=now, from_id=owner_id, cleared=True)
+            for toy_id in ids
+        ]
+
+    def _release_toy_for(self, room: Room, client_id: str, now: int) -> None:
+        if client_id in room.toy_owners:
+            room.toy_notices.extend(self._stop_messages(room, client_id, now))
+            room.leases.pop(client_id, None)
+            room.toy_owners.pop(client_id, None)
+            room.toy_notices.append(self._lease_message(room, client_id))
+        for owner_id, lease in list(room.leases.items()):
+            if lease.controller_id != client_id or owner_id == client_id:
+                continue
+            room.toy_notices.extend(self._stop_messages(room, owner_id, now))
+            room.leases.pop(owner_id, None)
+            room.toy_notices.append(self._lease_message(room, owner_id))
+
+    def _active_lease(self, room: Room, owner_id: str, now: int) -> ToyLease | None:
+        lease = room.leases.get(owner_id)
+        if lease is None:
+            return None
+        if lease.expires_at <= now:
+            room.leases.pop(owner_id, None)
+            room.toy_notices.extend(self._stop_messages(room, owner_id, now))
+            room.toy_notices.append(self._lease_message(room, owner_id))
+            return None
+        return lease
+
+    async def public_leases(self, room_code: str) -> list[dict[str, Any]]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return []
+            return self.lease_snapshot(room)
+
+    def lease_snapshot(self, room: Room) -> list[dict[str, Any]]:
+        now = int(time.time() * 1000)
+        for owner_id in list(room.leases):
+            self._active_lease(room, owner_id, now)
+        owner_ids = list(dict.fromkeys([*room.toy_owners.keys(), *room.leases.keys()]))
+        return [self._lease_message(room, owner_id) for owner_id in owner_ids]
+
+    async def drain_toy_notices(self, room_code: str) -> list[dict[str, Any]]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return []
+            notices = list(room.toy_notices)
+            room.toy_notices.clear()
+            return notices
+
+    async def set_toys(
+        self,
+        room_code: str,
+        client_id: str,
+        toys: Any,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None
+            member = room.members.get(client_id)
+            if not member or (websocket is not None and member.websocket is not websocket):
+                return "forbidden", room
+            room.toy_owners[client_id] = self._normalize_toys(toys)
+            lease = room.leases.get(client_id)
+            if lease:
+                lease.toys = list(room.toy_owners[client_id])
+                lease.owner_name = member.name
+            room.toy_notices.append(self._lease_message(room, client_id))
+            return "ok", room
+
+    async def clear_toys(
+        self,
+        room_code: str,
+        client_id: str,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None
+            member = room.members.get(client_id)
+            if not member or (websocket is not None and member.websocket is not websocket):
+                return "forbidden", room
+            now = int(time.time() * 1000)
+            self._release_toy_for(room, client_id, now)
+            return "ok", room
+
+    async def grant_toy(
+        self,
+        room_code: str,
+        owner_id: str,
+        controller_id: str,
+        seconds: int,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None, int | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None, None
+            owner = room.members.get(owner_id)
+            if (
+                not owner
+                or owner_id not in room.toy_owners
+                or (websocket is not None and owner.websocket is not websocket)
+            ):
+                return "forbidden", room, None
+            try:
+                span = int(seconds)
+            except (TypeError, ValueError):
+                return "forbidden", room, None
+            if span < TOY_GRANT_MIN_SECONDS or span > TOY_GRANT_MAX_SECONDS:
+                return "forbidden", room, None
+            controller = room.members.get(str(controller_id or "").strip())
+            if not controller or not controller.online:
+                return "missing", room, None
+            now = int(time.time() * 1000)
+            expires_at = now + span * 1000
+            room.leases[owner_id] = ToyLease(
+                owner_id=owner_id,
+                owner_name=owner.name,
+                controller_id=controller.client_id,
+                controller_name=controller.name,
+                expires_at=expires_at,
+                toys=list(room.toy_owners.get(owner_id, [])),
+            )
+            room.toy_notices.append(self._lease_message(room, owner_id))
+            return "ok", room, expires_at
+
+    async def revoke_toy(
+        self,
+        room_code: str,
+        owner_id: str,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None
+            owner = room.members.get(owner_id)
+            if (
+                not owner
+                or owner_id not in room.toy_owners
+                or (websocket is not None and owner.websocket is not websocket)
+            ):
+                return "forbidden", room
+            now = int(time.time() * 1000)
+            if owner_id in room.leases:
+                room.toy_notices.extend(self._stop_messages(room, owner_id, now))
+                room.leases.pop(owner_id, None)
+            room.toy_notices.append(self._lease_message(room, owner_id))
+            return "ok", room
+
+    async def expire_lease(
+        self,
+        room_code: str,
+        owner_id: str,
+        expected_expires_at: int,
+    ) -> tuple[HrStatus, Room | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None
+            lease = room.leases.get(owner_id)
+            if lease is None or lease.expires_at != expected_expires_at:
+                return "drop", room
+            now = int(time.time() * 1000)
+            if lease.expires_at > now:
+                return "drop", room
+            room.toy_notices.extend(self._stop_messages(room, owner_id, now))
+            room.leases.pop(owner_id, None)
+            room.toy_notices.append(self._lease_message(room, owner_id))
+            return "ok", room
+
+    async def push_toy(
+        self,
+        room_code: str,
+        client_id: str,
+        toy_id: str | None,
+        level: int,
+        *,
+        websocket: WebSocket | None = None,
+    ) -> tuple[HrStatus, Room | None]:
+        code = room_code.strip().upper()
+        async with self._lock:
+            room = self._rooms.get(code)
+            if not room:
+                return "missing", None
+            sender = room.members.get(client_id)
+            if not sender or (websocket is not None and sender.websocket is not websocket):
+                return "forbidden", room
+            now = int(time.time() * 1000)
+            owner_id = self._toy_owner_for_sender(room, client_id, now)
+            if owner_id is None:
+                return "forbidden", room
+            try:
+                clamped = max(TOY_LEVEL_MIN, min(TOY_LEVEL_MAX, int(level)))
+            except (TypeError, ValueError):
+                return "forbidden", room
+            clean_id = str(toy_id).strip()[:64] if toy_id else None
+            if clean_id == "":
+                clean_id = None
+            known = {toy["id"] for toy in room.toy_owners.get(owner_id, [])}
+            if clean_id and known and clean_id not in known:
+                return "forbidden", room
+            if self._throttled(sender.last_toy_at, now, self._toy_min_interval_ms):
+                return "drop", room
+            owner = room.members.get(owner_id)
+            sender.last_toy_at = now
+            room.toy_notices.append(
+                toy_message(
+                    {"client_id": owner_id, "name": owner.name if owner else "匿名"},
+                    toy_id=clean_id,
+                    level=clamped,
+                    ts=now,
+                    from_id=client_id,
+                )
+            )
+            return "ok", room
+
+    def _toy_owner_for_sender(self, room: Room, client_id: str, now: int) -> str | None:
+        for owner_id in list(room.leases):
+            lease = self._active_lease(room, owner_id, now)
+            if lease and lease.controller_id == client_id:
+                return owner_id
+        if client_id not in room.toy_owners:
+            return None
+        lease = self._active_lease(room, client_id, now)
+        if lease and lease.controller_id != client_id:
+            return None
+        return client_id
 
     async def broadcast(
         self, room: Room, message: dict[str, Any], exclude: str | None = None

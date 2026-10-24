@@ -16,6 +16,8 @@
         <a class="meta" href="./index.html">← 回首頁</a>
       </div>
 
+      <div id="waveStage"></div>
+
       <section class="panel">
         <div class="row" style="justify-content: space-between">
           <div>
@@ -63,7 +65,8 @@
         <div class="row">
           <span class="status idle" id="lovenseStatus">尚未連接</span>
         </div>
-        <p class="hint">只控制這台瀏覽器授權的玩具，不會同步到房間。</p>
+        <p class="hint">玩具連在這台瀏覽器。房間裡有其他人時，可以指定誰控制、控制多久。</p>
+        <div id="toyGrant"></div>
         <div class="row">
           <button id="lovenseConnect" type="button">連接玩具</button>
           <button id="lovenseOpenApp" class="secondary" type="button" hidden disabled>打開 App</button>

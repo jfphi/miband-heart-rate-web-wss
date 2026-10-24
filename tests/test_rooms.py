@@ -286,5 +286,75 @@ class RoomManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(member.updated_at)
 
 
+class ToyLeaseTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.mgr = RoomManager()
+        self.owner = DummyWS("owner")
+        self.other = DummyWS("other")
+        self.stranger = DummyWS("stranger")
+        await self.mgr.join(
+            room_code="ROOM", client_id="own", name="Own", role="publisher", websocket=self.owner
+        )
+        await self.mgr.join(
+            room_code="ROOM", client_id="ctl", name="Ctl", role="viewer", websocket=self.other
+        )
+        await self.mgr.join(
+            room_code="ROOM", client_id="see", name="See", role="viewer", websocket=self.stranger
+        )
+
+    async def test_stranger_cannot_push_or_grant(self) -> None:
+        status, _room = await self.mgr.push_toy("ROOM", "see", "lush", 5, websocket=self.stranger)
+        self.assertEqual(status, "forbidden")
+        status, _room, _exp = await self.mgr.grant_toy(
+            "ROOM", "see", "ctl", 30, websocket=self.stranger
+        )
+        self.assertEqual(status, "forbidden")
+
+    async def test_level_is_clamped_and_controller_can_push(self) -> None:
+        status, room = await self.mgr.set_toys(
+            "ROOM", "own", [{"id": "lush", "name": "Lush"}], websocket=self.owner
+        )
+        self.assertEqual(status, "ok")
+        status, room, expires = await self.mgr.grant_toy(
+            "ROOM", "own", "ctl", 30, websocket=self.owner
+        )
+        self.assertEqual(status, "ok")
+        self.assertIsNotNone(expires)
+        await self.mgr.drain_toy_notices("ROOM")
+        status, _room = await self.mgr.push_toy("ROOM", "own", "lush", 3, websocket=self.owner)
+        self.assertEqual(status, "forbidden")
+        status, _room = await self.mgr.push_toy("ROOM", "ctl", "lush", 99, websocket=self.other)
+        self.assertEqual(status, "ok")
+        notices = await self.mgr.drain_toy_notices("ROOM")
+        self.assertEqual(notices[-1]["level"], 20)
+        self.assertEqual(notices[-1]["fromId"], "ctl")
+        self.assertEqual(notices[-1]["clientId"], "own")
+
+    async def test_expire_and_leave_revoke(self) -> None:
+        await self.mgr.set_toys(
+            "ROOM", "own", [{"id": "lush", "name": "Lush"}], websocket=self.owner
+        )
+        _status, _room, expires = await self.mgr.grant_toy(
+            "ROOM", "own", "ctl", 30, websocket=self.owner
+        )
+        room = self.mgr._rooms["ROOM"]
+        room.leases["own"].expires_at = expires
+        status, _room = await self.mgr.expire_lease("ROOM", "own", expires)
+        self.assertEqual(status, "drop")
+        room.leases["own"].expires_at = 1
+        status, _room = await self.mgr.expire_lease("ROOM", "own", 1)
+        self.assertEqual(status, "ok")
+        notices = await self.mgr.drain_toy_notices("ROOM")
+        self.assertTrue(any(item.get("cleared") for item in notices))
+        self.assertTrue(any(item.get("type") == "toy_lease" and item.get("controllerId") is None for item in notices))
+
+        await self.mgr.grant_toy("ROOM", "own", "ctl", 30, websocket=self.owner)
+        await self.mgr.drain_toy_notices("ROOM")
+        await self.mgr.leave("ROOM", "ctl", websocket=self.other)
+        notices = await self.mgr.drain_toy_notices("ROOM")
+        self.assertTrue(any(item.get("type") == "toy_lease" and not item.get("controllerId") for item in notices))
+        self.assertTrue(any(item.get("cleared") for item in notices))
+
+
 if __name__ == "__main__":
     unittest.main()

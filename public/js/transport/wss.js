@@ -51,6 +51,8 @@ export function createWssTransport(cfg) {
   let onRoster = null;
   let onError = null;
   let onStatus = null;
+  let onToy = null;
+  let onToyLease = null;
   let members = new Map();
   let openPromise = null;
   let shouldReconnect = false;
@@ -195,6 +197,7 @@ export function createWssTransport(cfg) {
           members.set(m.clientId, memberFromServer(m));
         });
         emitRoster();
+        for (const lease of msg.toyLeases || []) onToyLease?.(lease);
         onStatus?.('connected', '房間已連線');
         if (role === 'publisher') {
           void sendHr.flush().catch(() => {});
@@ -241,6 +244,14 @@ export function createWssTransport(cfg) {
           soundUpdatedAt: msg.ts ?? null,
           online: true,
         });
+        break;
+      }
+      case 'toy': {
+        onToy?.(msg);
+        break;
+      }
+      case 'toy_lease': {
+        onToyLease?.(msg);
         break;
       }
       case 'session_replaced': {
@@ -384,6 +395,8 @@ export function createWssTransport(cfg) {
       onRoster: rosterCb,
       onError: errorCb,
       onStatus: statusCb,
+      onToy: toyCb,
+      onToyLease: leaseCb,
     }) {
       // Invalidate any prior session / in-flight reconnect before starting fresh.
       shouldReconnect = false;
@@ -407,6 +420,8 @@ export function createWssTransport(cfg) {
       onRoster = rosterCb;
       onError = errorCb;
       onStatus = statusCb;
+      onToy = toyCb;
+      onToyLease = leaseCb;
       shouldReconnect = true;
       reconnectAttempt = 0;
       members.clear();
@@ -485,6 +500,33 @@ export function createWssTransport(cfg) {
       sendMic.reset();
       sendMic.pause();
       trySend({ type: 'mic_clear' });
+    },
+
+    supportsToyControl: true,
+
+    publishToy(payload) {
+      return trySend({
+        type: 'toy',
+        toyId: payload?.toyId || null,
+        level: payload?.level,
+        ts: payload?.ts,
+      });
+    },
+
+    publishToyReady(toys) {
+      return trySend({ type: 'toy_ready', toys: toys || [] });
+    },
+
+    clearToy() {
+      return trySend({ type: 'toy_clear' });
+    },
+
+    grantToy({ controllerId, seconds }) {
+      return trySend({ type: 'toy_grant', controllerId, seconds });
+    },
+
+    revokeToy() {
+      return trySend({ type: 'toy_revoke' });
     },
 
     async leaveRoom() {

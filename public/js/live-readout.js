@@ -34,6 +34,20 @@ function contactText(contact) {
  */
 export function mountLiveReadout(root, options = {}) {
   const showSignal = Boolean(options.showSignal);
+  const charts = options.charts !== false;
+  const chartBlock = charts
+    ? `
+      <div class="hr-chart-wrap">
+        <div class="hr-chart-label">近 60 秒 BPM</div>
+        <svg class="hr-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="none" role="img" aria-label="近 60 秒心率">
+          <line class="hr-chart-baseline" x1="0" y1="${CHART_H / 2}" x2="${CHART_W}" y2="${CHART_H / 2}"></line>
+          <polyline class="hr-chart-line" fill="none" points=""></polyline>
+        </svg>
+      </div>`
+    : '';
+  const waveBlock = charts
+    ? `<canvas class="wave-canvas" width="640" height="${WAVE_H}" aria-label="近 12 秒音量"></canvas>`
+    : '';
   root.innerHTML = `
     <div class="live-readout">
       <div class="row readout-status-row">
@@ -42,13 +56,7 @@ export function mountLiveReadout(root, options = {}) {
       </div>
       <div class="bpm">--</div>
       <div class="meta readout-contact">佩戴狀態：—</div>
-      <div class="hr-chart-wrap">
-        <div class="hr-chart-label">近 60 秒 BPM</div>
-        <svg class="hr-chart" viewBox="0 0 ${CHART_W} ${CHART_H}" preserveAspectRatio="none" role="img" aria-label="近 60 秒心率">
-          <line class="hr-chart-baseline" x1="0" y1="${CHART_H / 2}" x2="${CHART_W}" y2="${CHART_H / 2}"></line>
-          <polyline class="hr-chart-line" fill="none" points=""></polyline>
-        </svg>
-      </div>
+      ${chartBlock}
       <div class="mic-panel">
         <div class="row">
           <span class="status idle readout-mic">麥克風未開啟</span>
@@ -58,7 +66,7 @@ export function mountLiveReadout(root, options = {}) {
           <div class="mic-meter-fill"></div>
           <div class="mic-meter-peak"></div>
         </div>
-        <canvas class="wave-canvas" width="640" height="${WAVE_H}" aria-label="近 12 秒音量"></canvas>
+        ${waveBlock}
       </div>
     </div>
   `;
@@ -96,6 +104,7 @@ export function mountLiveReadout(root, options = {}) {
   let frameId = 0;
 
   function paintChart(now) {
+    if (!lineEl) return;
     const series = hrPoints.map((p) => ({ t: p.t, value: p.bpm }));
     const coords = sparklinePoints(series, {
       width: CHART_W,
@@ -110,6 +119,7 @@ export function mountLiveReadout(root, options = {}) {
   }
 
   function paintWave(now) {
+    if (!canvas) return;
     const cssW = canvas.clientWidth || 320;
     const dpr = window.devicePixelRatio || 1;
     const pxW = Math.max(1, Math.floor(cssW * dpr));

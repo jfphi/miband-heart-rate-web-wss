@@ -254,6 +254,28 @@ export function createFirebaseTransport(cfg) {
       roomCode = null;
     },
 
+    supportsToyControl: false,
+
+    publishToy() {
+      return false;
+    },
+
+    publishToyReady() {
+      return false;
+    },
+
+    clearToy() {
+      return false;
+    },
+
+    grantToy() {
+      return false;
+    },
+
+    revokeToy() {
+      return false;
+    },
+
     getShareUrl({ roomCode: code, role: shareRole = 'viewer' }) {
       const page = shareRole === 'publisher' ? 'publish.html' : 'watch.html';
       const url = new URL(page, window.location.href);

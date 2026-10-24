@@ -7,8 +7,12 @@ import {
   MiBandBle,
 } from './ble.js';
 import { formatDisplayVersion, loadConfig } from './config.js';
+import { pushHrSample } from './hr-chart.js';
+import { pushLevelSample } from './audio/waveform.js';
 import { mountLiveReadout } from './live-readout.js';
 import { mountLovensePanel } from './lovense-panel.js';
+import { REMOTE_COLORS, pushWaveSample } from './lovense-wave.js';
+import { mountWaveStage } from './wave-stage.js';
 import { createTransport } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
@@ -31,8 +35,64 @@ const el = {
   stopMic: document.getElementById('stopMic'),
 };
 
-const readout = mountLiveReadout(document.getElementById('liveReadout'));
+const readout = mountLiveReadout(document.getElementById('liveReadout'), { charts: false });
+const stage = mountWaveStage(document.getElementById('waveStage'));
 readout.setName(name);
+let hrPoints = [];
+let levelPoints = [];
+let roomMembers = [];
+/** @type {any[]} */
+let leases = [];
+/** @type {Map<string, { color: string, samples: { t: number, level: number }[] }>} */
+const toySeries = new Map();
+let toyColors = 0;
+
+function paintStage() {
+  stage.setHeart(hrPoints);
+  stage.setSound(levelPoints);
+  stage.setToys(
+    Array.from(toySeries.values()).map((line) => ({
+      color: line.color,
+      samples: line.samples,
+    })),
+  );
+}
+
+function pushContext() {
+  panel.setContext({
+    clientId,
+    members: roomMembers,
+    leases,
+  });
+}
+
+function noteToy(msg) {
+  if (!msg?.clientId) return;
+  const key = `${msg.clientId}:${msg.toyId || '*'}`;
+  let line = toySeries.get(key);
+  if (!line) {
+    line = { color: REMOTE_COLORS[toyColors % REMOTE_COLORS.length], samples: [] };
+    toyColors += 1;
+    toySeries.set(key, line);
+  }
+  const now = msg.ts || Date.now();
+  line.samples = pushWaveSample(line.samples, msg.cleared ? 0 : Number(msg.level), now, 12_000);
+  paintStage();
+  panel.applyIncoming(msg);
+}
+
+function noteLease(lease) {
+  if (!lease?.ownerId) return;
+  leases = leases.filter((item) => item.ownerId !== lease.ownerId);
+  if (lease.toys?.length || lease.controllerId) leases.push(lease);
+  if (!lease.controllerId && !(lease.toys || []).length) {
+    for (const key of toySeries.keys()) {
+      if (key.startsWith(`${lease.ownerId}:`)) toySeries.delete(key);
+    }
+    paintStage();
+  }
+  pushContext();
+}
 
 el.roomCode.textContent = room || '------';
 
@@ -69,6 +129,8 @@ let bucketTimer = null;
 const micSupported = isMicSupported();
 
 function clearLocalHr({ remote = false } = {}) {
+  hrPoints = [];
+  paintStage();
   readout.clearHr();
   if (remote) {
     try {
@@ -119,6 +181,8 @@ function haltMic({ remote = false } = {}) {
   allowMicPublish = false;
   stopMicBucket();
   mic.stop();
+  levelPoints = [];
+  paintStage();
   readout.clearLevel();
   if (remote) {
     try {
@@ -153,7 +217,10 @@ if (!micSupported) {
 const mic = createMicLevel({
   onLevel: (db) => {
     if (!allowMicPublish) return;
-    readout.pushLevel(db, Date.now());
+    const ts = Date.now();
+    levelPoints = pushLevelSample(levelPoints, db, ts);
+    paintStage();
+    readout.pushLevel(db, ts);
     if (bucketDb == null || db > bucketDb) bucketDb = db;
   },
   onStatus: (status, text) => {
@@ -167,6 +234,8 @@ const mic = createMicLevel({
 const ble = new MiBandBle({
   onHeartRate: async ({ bpm, contact }) => {
     const ts = Date.now();
+    hrPoints = pushHrSample(hrPoints, bpm, ts);
+    paintStage();
     readout.pushHr(bpm, ts);
     readout.setContact(contact);
     try {
@@ -268,6 +337,8 @@ window.addEventListener('beforeunload', () => {
   stopMicBucket();
   mic.stop();
   readout.destroy();
+  stage.destroy();
+  panel.destroy?.();
   transport?.leaveRoom();
 });
 
@@ -288,10 +359,14 @@ async function init() {
       name,
       clientId,
       onRoster: (members) => {
+        roomMembers = members;
         const online = members.filter((m) => m.online !== false).length;
         const publishers = members.filter((m) => m.role === 'publisher').length;
         el.rosterMeta.textContent = `房間人數：${online}（發布者 ${publishers}）`;
+        pushContext();
       },
+      onToy: noteToy,
+      onToyLease: noteLease,
       onStatus: (kind, text) => {
         if (kind === 'replaced') {
           setStatus(el.roomStatus, 'error', text);
@@ -328,5 +403,7 @@ async function init() {
   }
 }
 
-mountLovensePanel(document.getElementById('lovensePanel'));
+const panel = mountLovensePanel(document.getElementById('lovensePanel'), {
+  getTransport: () => transport,
+});
 init();
