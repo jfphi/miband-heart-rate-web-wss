@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPatternPlan, createCommandQueue, planToyCommand } from '../public/js/lovense-command.js';
+import { buildPatternPlan, createCommandQueue, planToyCommand, sdkCommandBody } from '../public/js/lovense-command.js';
 
 describe('planToyCommand', () => {
   it('vibrates on a new strength', () => {
@@ -109,5 +109,36 @@ describe('createCommandQueue', () => {
     expect(sent[0].toyId).toBe('abc');
     expect(sent[0].strength).toBe('4;8');
     expect(queue.lastSent).toBeNull();
+  });
+});
+
+describe('sdkCommandBody', () => {
+  it('keeps a plain vibrate on sendToyCommand', () => {
+    expect(sdkCommandBody({
+      action: 'vibrate',
+      level: 4,
+      toyId: 'ferri',
+      features: { vibrate: 4 },
+    })).toEqual({
+      method: 'sendToyCommand',
+      body: { vibrate: 4, toyId: 'ferri' },
+    });
+  });
+
+  it('sends both Gemini motors in one Function action', () => {
+    expect(sdkCommandBody({
+      action: 'function',
+      toyId: 'gem',
+      features: { vibrate1: 8, vibrate2: 3 },
+    })).toEqual({
+      method: 'sendRawCommand',
+      body: {
+        command: 'Function',
+        apiVer: 1,
+        action: 'Vibrate1:8,Vibrate2:3',
+        timeSec: 0,
+        toy: 'gem',
+      },
+    });
   });
 });

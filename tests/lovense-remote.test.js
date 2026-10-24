@@ -8,7 +8,7 @@ import {
   resampleStroke,
 } from '../public/js/lovense-remote.js';
 
-const edge = { id: 'a', name: 'Edge', connected: true };
+const edge = { id: 'a', name: 'Lush', connected: true };
 const hush = { id: 'b', name: 'Hush', connected: true };
 
 describe('track geometry', () => {
@@ -66,7 +66,13 @@ describe('createRemoteModel', () => {
     const model = createRemoteModel();
     model.setToys([edge], 0);
     expect(model.begin('a', 10, 100)).toEqual([
-      { action: 'vibrate', level: 10, toyId: null },
+      {
+        action: 'vibrate',
+        level: 10,
+        toyId: 'a',
+        features: { vibrate: 10 },
+        signature: 'vibrate:10',
+      },
     ]);
     expect(model.end('a', 200)).toEqual([]);
     expect(model.view(200).controls[0].level).toBe(10);
@@ -79,7 +85,13 @@ describe('createRemoteModel', () => {
     model.setToys([edge], 0);
     model.toggleFloat(0);
     model.begin('a', 8, 10);
-    expect(model.end('a', 40)).toEqual([{ action: 'stop', level: 0, toyId: null }]);
+    expect(model.end('a', 40)).toEqual([{
+      action: 'stop',
+      level: 0,
+      toyId: 'a',
+      features: { vibrate: 0 },
+      signature: 'vibrate:0',
+    }]);
     expect(model.view(40).controls[0].level).toBe(0);
     expect(model.view(40).mode).toBe('off');
   });
@@ -93,7 +105,7 @@ describe('createRemoteModel', () => {
     const started = model.end('a', 1000);
     expect(started[0].action).toBe('pattern');
     expect(started[0].time).toBe(0);
-    expect(started[0].toyId).toBeNull();
+    expect(started[0].toyId).toBe('a');
     expect(started[0].strength.split(';').length).toBeLessThanOrEqual(50);
     expect(started[0].interval).toBeGreaterThan(100);
 
@@ -111,8 +123,10 @@ describe('createRemoteModel', () => {
   it('moves every toy together while Local Sync is on', () => {
     const model = createRemoteModel();
     model.setToys([edge, hush], 0);
+    model.toggleLocalSync(0);
     model.begin('b', 6, 50);
     const view = model.view(50);
+    expect(view.localSync).toBe(true);
     expect(view.controls.map((toy) => toy.level)).toEqual([6, 6]);
     expect(view.series).toHaveLength(2);
     expect(view.series[0].color).not.toBe(view.series[1].color);
@@ -121,9 +135,14 @@ describe('createRemoteModel', () => {
   it('sends a toy id when Local Sync is off', () => {
     const model = createRemoteModel();
     model.setToys([edge, hush], 0);
-    model.toggleLocalSync(10);
     const plans = model.begin('b', 4, 20);
-    expect(plans).toEqual([{ action: 'vibrate', level: 4, toyId: 'b' }]);
+    expect(plans).toEqual([{
+      action: 'vibrate',
+      level: 4,
+      toyId: 'b',
+      features: { vibrate: 4 },
+      signature: 'vibrate:4',
+    }]);
     const view = model.view(20);
     expect(view.controls.map((toy) => toy.level)).toEqual([0, 4]);
     expect(view.localSync).toBe(false);
@@ -133,7 +152,7 @@ describe('createRemoteModel', () => {
     const model = createRemoteModel();
     model.setToys([edge], 0);
     expect(model.toggleLocalSync(0)).toEqual([]);
-    expect(model.view(0).localSync).toBe(true);
+    expect(model.view(0).localSync).toBe(false);
     expect(model.view(0).canSync).toBe(false);
   });
 
@@ -143,5 +162,90 @@ describe('createRemoteModel', () => {
     expect(model.toggleTraditional()).toEqual([]);
     expect(model.view(0).traditional).toBe(true);
     expect(model.view(0).mode).toBe('float');
+  });
+
+  it('splits a Gemini into two axes and leaves the other toy alone', () => {
+    const model = createRemoteModel();
+    const ferri = { id: 'f', name: 'Ferri', toyType: 'ferri', connected: true };
+    const gemini = { id: 'g', name: 'Gemini', toyType: 'gemini', connected: true };
+    model.setToys([ferri, gemini], 0);
+    const view = model.view(0);
+    expect(view.countLabel).toBe('2 Toys Connected');
+    expect(view.controls.map((toy) => toy.name)).toEqual(['Ferri', 'Gemini 1', 'Gemini 2']);
+    expect(view.series).toHaveLength(3);
+
+    model.begin('g:vibrate2', 3, 10);
+    model.end('g:vibrate2', 11);
+    const plans = model.begin('g:vibrate1', 8, 20);
+    expect(plans).toEqual([{
+      action: 'function',
+      level: 8,
+      toyId: 'g',
+      features: { vibrate1: 8, vibrate2: 3 },
+      signature: 'vibrate1:8,vibrate2:3',
+    }]);
+    expect(model.view(20).controls.map((toy) => toy.level)).toEqual([0, 8, 3]);
+
+    model.end('g:vibrate1', 21);
+    const dropped = model.begin('g:vibrate1', 0, 30);
+    expect(dropped[0].action).toBe('function');
+    expect(dropped[0].features).toEqual({ vibrate1: 0, vibrate2: 3 });
+
+    model.end('g:vibrate1', 31);
+    const stopped = model.begin('g:vibrate2', 0, 40);
+    expect(stopped).toEqual([{
+      action: 'stop',
+      level: 0,
+      toyId: 'g',
+      features: { vibrate1: 0, vibrate2: 0 },
+      signature: 'vibrate1:0,vibrate2:0',
+    }]);
+  });
+
+  it('locks every lane when Local Sync is turned on', () => {
+    const model = createRemoteModel();
+    model.setToys([
+      { id: 'f', name: 'Ferri', toyType: 'ferri', connected: true },
+      { id: 'g', name: 'Gemini', toyType: 'gemini', connected: true },
+    ], 0);
+    model.begin('g:vibrate1', 4, 10);
+    model.end('g:vibrate1', 11);
+    model.toggleLocalSync(12);
+    const plans = model.begin('f', 6, 20);
+    expect(plans).toEqual([{ action: 'vibrate', level: 6, toyId: null }]);
+    expect(model.view(20).controls.map((toy) => toy.level)).toEqual([6, 6, 6]);
+    expect(model.view(20).countLabel).toBe('2 Toys Connected');
+  });
+
+  it('replays a multi-axis loop as combined levels', () => {
+    const model = createRemoteModel();
+    model.setToys([{ id: 'g', name: 'Gemini', toyType: 'gemini', connected: true }], 0);
+    model.begin('g:vibrate2', 4, 0);
+    model.end('g:vibrate2', 1);
+    model.toggleLoop(2);
+    model.begin('g:vibrate1', 0, 10);
+    model.move('g:vibrate1', 20, 1010);
+    const started = model.end('g:vibrate1', 1010);
+    expect(started.some((plan) => plan.action === 'pattern')).toBe(false);
+    expect(started[0].features.vibrate2).toBe(4);
+
+    let sent = [];
+    for (let t = 1060; t < 3000; t += 40) {
+      sent = model.tick(t);
+      if (sent.length) break;
+    }
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent[0].action).toBe('function');
+    expect(sent[0].features.vibrate2).toBe(4);
+    expect(sent[0].features.vibrate1).not.toBe(started[0].features.vibrate1);
+  });
+
+  it('caps a pump axis at 3', () => {
+    const model = createRemoteModel();
+    model.setToys([{ id: 'm', name: 'Max', toyType: 'Max 2', connected: true }], 0);
+    const plans = model.begin('m:pump', 20, 5);
+    expect(plans[0].features.pump).toBe(3);
+    expect(plans[0].features.vibrate).toBe(0);
+    expect(model.view(5).controls.find((toy) => toy.id === 'm:pump').level).toBe(3);
   });
 });

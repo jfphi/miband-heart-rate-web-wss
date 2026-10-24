@@ -42,6 +42,58 @@ export function buildPatternPlan(levels, interval, toyId = null) {
   };
 }
 
+const SDK_FIELDS = new Set([
+  'vibrate', 'rotate', 'pump', 'thrusting', 'fingering', 'suction', 'depth', 'stroke', 'oscillate', 'all',
+]);
+
+const ACTION_NAMES = {
+  vibrate: 'Vibrate',
+  vibrate1: 'Vibrate1',
+  vibrate2: 'Vibrate2',
+  vibrate3: 'Vibrate3',
+  rotate: 'Rotate',
+  pump: 'Pump',
+  thrusting: 'Thrusting',
+  fingering: 'Fingering',
+  suction: 'Suction',
+  depth: 'Depth',
+  stroke: 'Stroke',
+  oscillate: 'Oscillate',
+  all: 'All',
+};
+
+/**
+ * Basic SDK sendToyCommand only forwards a fixed field list.
+ * Vibrate1/Vibrate2/Vibrate3 go out as one Function action so a sibling axis stays put.
+ * @param {{ action?: string, level?: number, toyId?: string | null, features?: Record<string, number> }} plan
+ */
+export function sdkCommandBody(plan) {
+  const features = plan?.features
+    || (plan?.action === 'vibrate' ? { vibrate: plan.level } : null);
+  if (!features) return null;
+  const keys = Object.keys(features).sort();
+  const needsRaw = keys.some((key) => !SDK_FIELDS.has(key));
+  if (!needsRaw) {
+    return {
+      method: 'sendToyCommand',
+      body: {
+        ...features,
+        ...(plan.toyId ? { toyId: plan.toyId } : {}),
+      },
+    };
+  }
+  return {
+    method: 'sendRawCommand',
+    body: {
+      command: 'Function',
+      apiVer: 1,
+      action: keys.map((key) => `${ACTION_NAMES[key] || key}:${features[key]}`).join(','),
+      timeSec: 0,
+      ...(plan.toyId ? { toy: plan.toyId } : {}),
+    },
+  };
+}
+
 /**
  * While a command is in flight, only the latest plan is kept.
  * Sends are spaced by minIntervalMs so a fast SDK cannot be flooded.
@@ -63,9 +115,14 @@ export function createCommandQueue(send, options = {}) {
   let pending = null;
   let generation = 0;
 
+  function planToken(plan) {
+    if (!plan || plan.action === 'pattern') return null;
+    return plan.signature != null ? plan.signature : (plan.level ?? null);
+  }
+
   function remember(plan) {
     if (plan.action === 'pattern') lastSent = null;
-    else lastSent = plan.level ?? null;
+    else lastSent = planToken(plan);
   }
 
   async function run(plan, gen) {
@@ -93,7 +150,7 @@ export function createCommandQueue(send, options = {}) {
     if (gen === generation && pending) {
       const next = pending;
       pending = null;
-      if (!(next.action === 'vibrate' && next.level === lastSent)) {
+      if (next.action === 'pattern' || planToken(next) !== lastSent) {
         await run(next, gen);
       }
     }

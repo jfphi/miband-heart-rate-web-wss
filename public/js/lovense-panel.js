@@ -1,8 +1,9 @@
-import { createCommandQueue } from './lovense-command.js';
+import { createCommandQueue, sdkCommandBody } from './lovense-command.js';
 import {
   createRemoteModel,
   knobTop,
   levelFromLane,
+  scaleTrackLevel,
 } from './lovense-remote.js';
 import { drawRemoteWave } from './lovense-wave.js';
 import { canSendToy, clampGrantSeconds, controlRole, grantVisible } from './toy-control.js';
@@ -281,11 +282,14 @@ function bindLovensePanel(root, hooks) {
           else sdk.stopToyAction();
           return;
         }
-        if (plan.action === 'vibrate') {
-          await Promise.resolve(sdk.sendToyCommand({
-            vibrate: plan.level,
-            ...(plan.toyId ? { toyId: plan.toyId } : {}),
-          }));
+        if (plan.action === 'vibrate' || plan.action === 'function') {
+          const spec = sdkCommandBody(plan);
+          if (!spec) return;
+          if (spec.method === 'sendRawCommand') {
+            await Promise.resolve(sdk.sendRawCommand(spec.body));
+          } else {
+            await Promise.resolve(sdk.sendToyCommand(spec.body));
+          }
           return;
         }
         if (plan.action === 'pattern') {
@@ -432,7 +436,7 @@ function bindLovensePanel(root, hooks) {
         const slider = document.createElement('input');
         slider.type = 'range';
         slider.min = '0';
-        slider.max = '20';
+        slider.max = String(control.max || 20);
         slider.step = '1';
         slider.value = String(Math.round(control.level));
         slider.className = 'remote-slider';
@@ -471,7 +475,7 @@ function bindLovensePanel(root, hooks) {
         orb.style.borderColor = control.color;
         orb.setAttribute('role', 'slider');
         orb.setAttribute('aria-valuemin', '0');
-        orb.setAttribute('aria-valuemax', '20');
+        orb.setAttribute('aria-valuemax', String(control.max || 20));
         orb.setAttribute('aria-label', `${control.name} 強度`);
         const name = document.createElement('span');
         name.className = 'remote-orb-name';
@@ -484,11 +488,11 @@ function bindLovensePanel(root, hooks) {
           event.preventDefault();
           lane.setPointerCapture(event.pointerId);
           orb.focus();
-          dispatch(model.begin(control.id, levelFromLane(event.clientY, lane.getBoundingClientRect()), Date.now()));
+          dispatch(model.begin(control.id, scaleTrackLevel(levelFromLane(event.clientY, lane.getBoundingClientRect()), control.max), Date.now()));
         });
         lane.addEventListener('pointermove', (event) => {
           if (model.draggingId() !== control.id) return;
-          dispatch(model.move(control.id, levelFromLane(event.clientY, lane.getBoundingClientRect()), Date.now()));
+          dispatch(model.move(control.id, scaleTrackLevel(levelFromLane(event.clientY, lane.getBoundingClientRect()), control.max), Date.now()));
         });
         lane.addEventListener('pointerup', () => {
           dispatch(model.end(control.id, Date.now()));
@@ -498,9 +502,10 @@ function bindLovensePanel(root, hooks) {
         });
         orb.addEventListener('keydown', (event) => {
           if (role.mode === 'owner-locked') return;
+          const limit = control.max || 20;
           const current = Number(orb.getAttribute('aria-valuenow')) || 0;
           let next = current;
-          if (event.key === 'ArrowUp' || event.key === 'ArrowRight') next = Math.min(20, current + 1);
+          if (event.key === 'ArrowUp' || event.key === 'ArrowRight') next = Math.min(limit, current + 1);
           else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') next = Math.max(0, current - 1);
           else return;
           event.preventDefault();
@@ -525,7 +530,7 @@ function bindLovensePanel(root, hooks) {
       const knob = lane.querySelector('.remote-knob');
       const orb = lane.querySelector('.remote-orb');
       if (!knob || !orb) continue;
-      knob.style.top = `${knobTop(control.level, lane.clientHeight)}px`;
+      knob.style.top = `${knobTop(control.level, lane.clientHeight, control.max)}px`;
       const shown = Math.round(control.level);
       orb.setAttribute('aria-valuenow', String(shown));
       orb.setAttribute('aria-valuetext', String(shown));
@@ -563,7 +568,7 @@ function bindLovensePanel(root, hooks) {
       const key = control.id || '*';
       if (relayed.get(key) === level) continue;
       relayed.set(key, level);
-      link.publishToy({ toyId: control.id, level, ts: now });
+      link.publishToy({ toyId: control.deviceId || control.id, level, ts: now });
     }
   }
 
@@ -591,6 +596,7 @@ function bindLovensePanel(root, hooks) {
       .map((toy) => ({
         id: String(toy.id),
         name: String(toy.nickname || toy.name || 'Toy'),
+        toyType: toy.toyType || toy.name || '',
         connected: true,
       }));
     const before = model.view(Date.now()).controls.length;
