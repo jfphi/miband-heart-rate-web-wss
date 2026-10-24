@@ -124,6 +124,7 @@ class LovenseSessionTests(unittest.TestCase):
     def test_fetch_rejects_bad_code_and_timeout(self) -> None:
         def bad_code(request, timeout=10):
             self.assertEqual(timeout, 10)
+            self.assertEqual(request.get_header("User-agent"), "Mozilla/5.0")
             sent = json.loads(request.data.decode())
             self.assertEqual(set(sent), {"token", "uid"})
             return _Body(b'{"code": 500, "message": "bad dev-token-value"}')
