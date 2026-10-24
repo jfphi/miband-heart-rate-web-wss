@@ -58,7 +58,7 @@ export function createFirebaseTransport(cfg) {
       online: true,
       updatedAt: serverTimestamp(),
     });
-  });
+  }, { minIntervalMs: 400, maxSilenceMs: 4000 });
 
   const sendMic = createMicThrottle(async ({ db, ts }) => {
     if (!selfRef || role !== 'publisher') {
@@ -69,7 +69,7 @@ export function createFirebaseTransport(cfg) {
       soundUpdatedAt: serverTimestamp(),
       online: true,
     });
-  });
+  }, { minIntervalMs: 50, maxSilenceMs: 1000 });
 
   function emitRoster(snapshotVal) {
     if (!onRoster) return;

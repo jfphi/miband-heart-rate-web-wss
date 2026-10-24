@@ -1,13 +1,9 @@
-import { dbToMeterPercent, formatMicAge } from './audio/micThrottle.js';
-import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
-import {
-  createRenderScheduler,
-  publisherStructureKey,
-} from './render-scheduler.js';
+import { dbToWaveAmp, meterZone, pushLevelSample } from './audio/waveform.js';
 import { formatDisplayVersion, loadConfig } from './config.js';
+import { pushHrSample } from './hr-chart.js';
+import { chooseFocus, mountLiveReadout } from './live-readout.js';
 import { createTransport } from './transport/index.js';
 import {
-  formatAge,
   getOrCreateClientId,
   isStale,
   parseQuery,
@@ -23,7 +19,8 @@ const el = {
   appVersion: document.getElementById('appVersion'),
   roomStatus: document.getElementById('roomStatus'),
   viewerName: document.getElementById('viewerName'),
-  cards: document.getElementById('cards'),
+  roster: document.getElementById('roster'),
+  live: document.getElementById('liveReadout'),
   empty: document.getElementById('empty'),
   error: document.getElementById('error'),
 };
@@ -31,12 +28,17 @@ const el = {
 el.roomCode.textContent = room || '------';
 el.viewerName.textContent = `你是：${name}`;
 
+const readout = mountLiveReadout(el.live, { showSignal: true });
+
 let members = [];
-let structureKey = publisherStructureKey([]);
+/** @type {string | null} */
+let focusedId = null;
+/** @type {string[]} */
+let previousIds = [];
 /** @type {Map<string, { t: number, bpm: number }[]>} */
 const hrHistory = new Map();
-/** @type {Map<string, { t: number, bpm: number }[]>} */
-const soundHistory = new Map();
+/** @type {Map<string, { t: number, db: number }[]>} */
+const levelHistory = new Map();
 
 function setStatus(kind, text) {
   el.roomStatus.className = `status ${kind}`;
@@ -48,109 +50,112 @@ function showError(msg) {
   el.error.textContent = msg || '';
 }
 
-function contactLabel(contact) {
-  if (contact === true) return '已佩戴';
-  if (contact === false) return '未接觸';
-  return '未知';
+function publishersOf(list) {
+  return list.filter((m) => m.role === 'publisher');
 }
 
-function syncHistory(list) {
+function signalAt(member) {
+  if (member.updatedAt != null && member.soundUpdatedAt != null) {
+    return Math.max(member.updatedAt, member.soundUpdatedAt);
+  }
+  return member.updatedAt ?? member.soundUpdatedAt ?? null;
+}
+
+function syncHistories(list) {
   const alive = new Set();
-  for (const m of list) {
-    if (m.role !== 'publisher') continue;
-    alive.add(m.clientId);
-    if (m.bpm == null) {
-      hrHistory.set(m.clientId, []);
+  for (const member of publishersOf(list)) {
+    alive.add(member.clientId);
+    if (member.bpm == null) {
+      hrHistory.set(member.clientId, []);
     } else {
-      const prev = hrHistory.get(m.clientId) || [];
-      const t = m.updatedAt || Date.now();
-      hrHistory.set(m.clientId, pushHrSample(prev, m.bpm, t));
+      const prev = hrHistory.get(member.clientId) || [];
+      const t = member.updatedAt || Date.now();
+      hrHistory.set(member.clientId, pushHrSample(prev, member.bpm, t));
     }
-    if (m.db == null) {
-      soundHistory.set(m.clientId, []);
+    if (member.db == null) {
+      levelHistory.set(member.clientId, []);
     } else {
-      const prev = soundHistory.get(m.clientId) || [];
-      const t = m.soundUpdatedAt || Date.now();
-      soundHistory.set(m.clientId, pushHrSample(prev, m.db, t));
+      const prev = levelHistory.get(member.clientId) || [];
+      const t = member.soundUpdatedAt || Date.now();
+      const last = prev[prev.length - 1];
+      if (!last || last.t !== t || last.db !== member.db) {
+        levelHistory.set(member.clientId, pushLevelSample(prev, member.db, t));
+      }
     }
   }
   for (const id of hrHistory.keys()) {
     if (!alive.has(id)) hrHistory.delete(id);
   }
-  for (const id of soundHistory.keys()) {
-    if (!alive.has(id)) soundHistory.delete(id);
+  for (const id of levelHistory.keys()) {
+    if (!alive.has(id)) levelHistory.delete(id);
   }
 }
 
-function render() {
-  const publishers = members.filter((m) => m.role === 'publisher');
-  el.empty.hidden = publishers.length > 0;
-  const now = Date.now();
-  el.cards.innerHTML = publishers
-    .map((m) => {
-      const signalAt =
-        m.updatedAt != null && m.soundUpdatedAt != null
-          ? Math.max(m.updatedAt, m.soundUpdatedAt)
-          : (m.updatedAt ?? m.soundUpdatedAt);
-      const stale = !m.online || isStale(signalAt);
-      const bpm = m.bpm == null ? '--' : String(m.bpm);
-      const contact = contactLabel(m.contact);
-      const signal = stale ? '訊號中斷' : '即時';
-      const points = pruneHrHistory(hrHistory.get(m.clientId) || [], now);
-      hrHistory.set(m.clientId, points);
-      const showMic = m.db != null || m.soundUpdatedAt != null;
-      const soundPoints = pruneHrHistory(soundHistory.get(m.clientId) || [], now);
-      soundHistory.set(m.clientId, soundPoints);
-      const dbText = m.db == null ? '--' : String(m.db);
-      const meter = dbToMeterPercent(m.db);
-      const micBlock = showMic
-        ? `
-          <div class="tag">dB · ${dbText}</div>
-          <div class="mic-meter" aria-hidden="true">
-            <div class="mic-meter-fill" style="width: ${meter}%"></div>
-          </div>
-          <div class="tag">${formatMicAge(m.soundUpdatedAt)}</div>
-          <div class="hr-chart-wrap">
-            <div class="hr-chart-label">近 60 秒 dB</div>
-            ${renderHrSparkline(soundPoints, {
-              now,
-              preferredMin: -80,
-              preferredMax: 0,
-              yScale: 'preferred',
-              ariaLabel: '近 60 秒音量',
-            })}
-          </div>
-        `
-        : '';
-      return `
-        <article class="card ${stale ? 'stale' : ''}">
-          <div class="name">${escapeHtml(m.name)}</div>
-          <div class="card-bpm">${bpm}</div>
-          <div class="tag">BPM · ${contact}</div>
-          <div class="tag">${signal} · ${formatAge(m.updatedAt)}</div>
-          <div class="hr-chart-wrap">
-            <div class="hr-chart-label">近 60 秒</div>
-            ${renderHrSparkline(points, { now })}
-          </div>
-          ${micBlock}
-        </article>
+function renderRoster(publishers) {
+  const seen = new Set();
+  for (const member of publishers) {
+    seen.add(member.clientId);
+    let button = el.roster.querySelector(`[data-id="${CSS.escape(member.clientId)}"]`);
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'roster-item';
+      button.dataset.id = member.clientId;
+      button.innerHTML = `
+        <span class="roster-name"></span>
+        <span class="roster-bpm"></span>
+        <span class="mic-meter roster-meter" hidden>
+          <span class="mic-meter-fill"></span>
+        </span>
       `;
-    })
-    .join('');
+      button.addEventListener('click', () => {
+        focusedId = member.clientId;
+        apply();
+      });
+      el.roster.appendChild(button);
+    }
+    const stale = !member.online || isStale(signalAt(member));
+    button.classList.toggle('is-selected', member.clientId === focusedId);
+    button.classList.toggle('is-stale', stale);
+    button.querySelector('.roster-name').textContent = member.name || '匿名';
+    button.querySelector('.roster-bpm').textContent = member.bpm == null ? '--' : String(member.bpm);
+    const meter = button.querySelector('.roster-meter');
+    const fill = button.querySelector('.mic-meter-fill');
+    if (member.db == null) {
+      meter.hidden = true;
+    } else {
+      meter.hidden = false;
+      fill.style.width = `${Math.round(dbToWaveAmp(member.db) * 100)}%`;
+      fill.className = `mic-meter-fill zone-${meterZone(member.db)}`;
+    }
+  }
+  for (const button of el.roster.querySelectorAll('.roster-item')) {
+    if (!seen.has(button.dataset.id)) button.remove();
+  }
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
+function apply() {
+  const publishers = publishersOf(members);
+  focusedId = chooseFocus(publishers, focusedId, previousIds);
+  previousIds = publishers.map((m) => m.clientId);
+  renderRoster(publishers);
+  const hasPeople = publishers.length > 0;
+  el.empty.hidden = hasPeople;
+  el.live.hidden = !hasPeople;
+  const member = publishers.find((m) => m.clientId === focusedId);
+  if (!member) return;
+  const stale = !member.online || isStale(signalAt(member));
+  readout.setName(member.name);
+  readout.setContact(member.bpm == null && member.contact == null ? undefined : member.contact);
+  readout.setHrSeries(hrHistory.get(member.clientId) || [], member.bpm);
+  readout.setLevelSeries(levelHistory.get(member.clientId) || [], member.db);
+  readout.setStale(stale);
+  readout.setSignal(stale ? 'error' : 'connected', stale ? '訊號中斷' : '即時');
+  readout.setMicStatus(
+    member.db == null ? 'idle' : 'listening',
+    member.db == null ? '麥克風未開啟' : '正在量測音量',
+  );
 }
-
-const scheduler = createRenderScheduler({
-  paint: render,
-  minIntervalMs: 1000,
-});
 
 async function init() {
   const cfg = await loadConfig();
@@ -176,11 +181,8 @@ async function init() {
         clientId: getOrCreateClientId(),
         onRoster: (list) => {
           members = list;
-          syncHistory(list);
-          const nextKey = publisherStructureKey(list);
-          const structural = nextKey !== structureKey;
-          structureKey = nextKey;
-          scheduler.request({ immediate: structural });
+          syncHistories(list);
+          apply();
         },
         onStatus: (kind, text) => {
           if (kind === 'replaced') {
@@ -206,17 +208,17 @@ async function init() {
       });
     })
     .catch((err) => {
-      // Hard failures only; WSS transient connect keeps reconnecting.
       showError(err.message || String(err));
       setStatus('error', '無法加入房間');
     });
 
+  const staleTimer = setInterval(apply, 1000);
+
   window.addEventListener('beforeunload', () => {
-    scheduler.stop();
+    clearInterval(staleTimer);
+    readout.destroy();
     transport?.leaveRoom();
   });
-
-  scheduler.startClock(1000);
 }
 
 init();

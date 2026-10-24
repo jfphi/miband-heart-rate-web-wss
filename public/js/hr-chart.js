@@ -82,26 +82,17 @@ export function pushHrSample(points, bpm, t = Date.now()) {
  * }} [opts]
  * @returns {string}
  */
-export function renderSparkline(points, opts = {}) {
+/** Polyline `points` for the last 60s. Empty string when there is nothing to draw. */
+export function sparklinePoints(points, opts = {}) {
   const width = opts.width ?? 220;
   const height = opts.height ?? 56;
   const now = opts.now ?? Date.now();
   const preferredMin = opts.preferredMin ?? 40;
   const preferredMax = opts.preferredMax ?? 180;
   const yScale = opts.yScale ?? 'preferred';
-  const className = opts.className ?? 'hr-chart';
-  const lineClass = opts.lineClass ?? 'hr-chart-line';
-  const baselineClass = opts.baselineClass ?? 'hr-chart-baseline';
   const t0 = now - WINDOW_MS;
   const recent = pruneHrHistory(points || [], now);
-
-  if (!recent.length) {
-    return `
-      <svg class="${className}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-        <line class="${baselineClass}" x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}" />
-      </svg>
-    `;
-  }
+  if (!recent.length) return '';
 
   /** @type {SparkPoint[]} */
   const series = [...recent];
@@ -116,11 +107,30 @@ export function renderSparkline(points, opts = {}) {
   );
   const span = max - min || 1;
 
-  const coords = series.map((p) => {
-    const x = ((Math.max(t0, p.t) - t0) / WINDOW_MS) * width;
-    const y = height - ((p.value - min) / span) * (height - 6) - 3;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
+  return series
+    .map((p) => {
+      const x = ((Math.max(t0, p.t) - t0) / WINDOW_MS) * width;
+      const y = height - ((p.value - min) / span) * (height - 6) - 3;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+}
+
+export function renderSparkline(points, opts = {}) {
+  const width = opts.width ?? 220;
+  const height = opts.height ?? 56;
+  const className = opts.className ?? 'hr-chart';
+  const lineClass = opts.lineClass ?? 'hr-chart-line';
+  const baselineClass = opts.baselineClass ?? 'hr-chart-baseline';
+  const coords = sparklinePoints(points, opts);
+
+  if (!coords) {
+    return `
+      <svg class="${className}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+        <line class="${baselineClass}" x1="0" y1="${height / 2}" x2="${width}" y2="${height / 2}" />
+      </svg>
+    `;
+  }
 
   const labelled = Boolean(opts.ariaLabel);
   const a11y = labelled
@@ -129,7 +139,7 @@ export function renderSparkline(points, opts = {}) {
 
   return `
     <svg class="${className}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"${a11y}>
-      <polyline class="${lineClass}" fill="none" points="${coords.join(' ')}" />
+      <polyline class="${lineClass}" fill="none" points="${coords}" />
     </svg>
   `;
 }

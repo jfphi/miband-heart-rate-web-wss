@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import time
 import unittest
@@ -185,7 +186,7 @@ class SensorManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mgr._rooms["ABCD"].members["c1"].bpm, 77)
 
     async def test_update_and_clear_mic(self) -> None:
-        mgr = RoomManager(hr_min_interval_ms=0)
+        mgr = RoomManager(hr_min_interval_ms=0, mic_min_interval_ms=0)
         ws = DummyWS("p")
         await mgr.join(
             room_code="ROOM",
@@ -221,7 +222,7 @@ class SensorManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(member.sound_updated_at)
 
     async def test_mic_rate_limit_drops(self) -> None:
-        mgr = RoomManager(hr_min_interval_ms=10_000)
+        mgr = RoomManager(hr_min_interval_ms=0, mic_min_interval_ms=50)
         ws = DummyWS("p")
         await mgr.join(
             room_code="ROOM",
@@ -235,6 +236,30 @@ class SensorManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, "ok")
         self.assertEqual(second, "drop")
         self.assertIsNone(member)
+
+    async def test_mic_interval_does_not_block_heart_rate(self) -> None:
+        mgr = RoomManager(hr_min_interval_ms=10_000, mic_min_interval_ms=50)
+        ws = DummyWS("p")
+        await mgr.join(
+            room_code="ROOM",
+            client_id="p1",
+            name="P",
+            role="publisher",
+            websocket=ws,
+        )
+        hr, _, _ = await mgr.update_hr("ROOM", "p1", 70, True, None, websocket=ws)
+        mic, _, _ = await mgr.update_mic("ROOM", "p1", -20, websocket=ws)
+        self.assertEqual(hr, "ok")
+        self.assertEqual(mic, "ok")
+        held, _, member = await mgr.update_hr("ROOM", "p1", 80, True, None, websocket=ws)
+        self.assertEqual(held, "drop")
+        self.assertIsNone(member)
+        await asyncio.sleep(0.06)
+        again, _, member = await mgr.update_mic("ROOM", "p1", -15, websocket=ws)
+        self.assertEqual(again, "ok")
+        assert member is not None
+        self.assertEqual(member.db, -15)
+        self.assertEqual(member.bpm, 70)
 
     async def test_viewer_cannot_push_mic(self) -> None:
         mgr = RoomManager()

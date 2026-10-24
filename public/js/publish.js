@@ -1,5 +1,4 @@
 import { createMicLevel, isMicSupported } from './audio/micLevel.js';
-import { dbToMeterPercent } from './audio/micThrottle.js';
 import {
   hasPersistedBleSession,
   errorText,
@@ -7,8 +6,8 @@ import {
   mapBleUiStatus,
   MiBandBle,
 } from './ble.js';
-import { pushHrSample, pruneHrHistory, renderHrSparkline } from './hr-chart.js';
 import { formatDisplayVersion, loadConfig } from './config.js';
+import { mountLiveReadout } from './live-readout.js';
 import { createTransport } from './transport/index.js';
 import { getOrCreateClientId, parseQuery } from './util.js';
 
@@ -22,25 +21,19 @@ const el = {
   appVersion: document.getElementById('appVersion'),
   roomStatus: document.getElementById('roomStatus'),
   bleStatus: document.getElementById('bleStatus'),
-  bpm: document.getElementById('bpm'),
-  contact: document.getElementById('contact'),
   rosterMeta: document.getElementById('rosterMeta'),
-  hrChart: document.getElementById('hrChart'),
   error: document.getElementById('error'),
   connectBle: document.getElementById('connectBle'),
   disconnectBle: document.getElementById('disconnectBle'),
   copyLink: document.getElementById('copyLink'),
-  micStatus: document.getElementById('micStatus'),
-  micDb: document.getElementById('micDb'),
-  micMeterFill: document.getElementById('micMeterFill'),
   openMic: document.getElementById('openMic'),
   stopMic: document.getElementById('stopMic'),
 };
 
-el.roomCode.textContent = room || '------';
+const readout = mountLiveReadout(document.getElementById('liveReadout'));
+readout.setName(name);
 
-/** @type {{ t: number, bpm: number }[]} */
-let hrHistory = [];
+el.roomCode.textContent = room || '------';
 
 function setStatus(node, kind, text) {
   node.className = `status ${kind}`;
@@ -58,27 +51,6 @@ function showError(msg) {
   el.error.textContent = text;
 }
 
-function renderChart() {
-  const now = Date.now();
-  hrHistory = pruneHrHistory(hrHistory, now);
-  el.hrChart.innerHTML = renderHrSparkline(hrHistory, { width: 640, height: 64, now });
-}
-
-function restartPulse(node) {
-  node.classList.remove('pulse');
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      node.classList.add('pulse');
-    });
-  });
-}
-
-function contactLabel(contact) {
-  if (contact === true) return '佩戴狀態：已佩戴';
-  if (contact === false) return '佩戴狀態：未接觸';
-  return '佩戴狀態：未知';
-}
-
 function syncBleConnectLabel() {
   el.connectBle.textContent = hasPersistedBleSession() ? '重新連線' : '連接小米手環';
 }
@@ -90,17 +62,13 @@ if (!room) {
 
 let transport = null;
 const clientId = getOrCreateClientId();
-let lastBpm = null;
 let allowMicPublish = false;
+let bucketDb = null;
+let bucketTimer = null;
 const micSupported = isMicSupported();
 
 function clearLocalHr({ remote = false } = {}) {
-  lastBpm = null;
-  el.bpm.textContent = '--';
-  el.bpm.classList.remove('pulse');
-  el.contact.textContent = '佩戴狀態：—';
-  hrHistory = [];
-  renderChart();
+  readout.clearHr();
   if (remote) {
     try {
       transport?.clearHr?.();
@@ -110,21 +78,49 @@ function clearLocalHr({ remote = false } = {}) {
   }
 }
 
-function setLocalDb(db) {
-  el.micDb.textContent = db == null ? '--' : String(db);
-  el.micMeterFill.style.width = `${dbToMeterPercent(db)}%`;
-}
-
 function syncMicButtons(status) {
   const active = status === 'listening' || status === 'requesting';
   el.openMic.disabled = !micSupported || active;
   el.stopMic.disabled = !active;
 }
 
+function stopMicBucket() {
+  if (bucketTimer != null) {
+    clearInterval(bucketTimer);
+    bucketTimer = null;
+  }
+  bucketDb = null;
+}
+
+async function flushMicBucket() {
+  if (bucketDb == null || !allowMicPublish) return;
+  const db = bucketDb;
+  bucketDb = null;
+  const ts = Date.now();
+  const published = transport?.publishMic?.({ db, ts });
+  if (published && typeof published.then === 'function') {
+    try {
+      if (await published) readout.pushLevel(db, ts);
+    } catch (err) {
+      showError(err.message || String(err));
+    }
+    return;
+  }
+  if (published) readout.pushLevel(db, ts);
+}
+
+function startMicBucket() {
+  if (bucketTimer != null) return;
+  bucketTimer = setInterval(() => {
+    void flushMicBucket();
+  }, 50);
+}
+
 function haltMic({ remote = false } = {}) {
   allowMicPublish = false;
+  stopMicBucket();
   mic.stop();
-  setLocalDb(null);
+  readout.clearLevel();
   if (remote) {
     try {
       transport?.clearMic?.();
@@ -149,25 +145,19 @@ async function haltSensors({ forgetBle = true } = {}) {
   syncBleConnectLabel();
 }
 
-renderChart();
-setInterval(renderChart, 1000);
 syncBleConnectLabel();
 if (!micSupported) {
   el.openMic.disabled = true;
-  setStatus(el.micStatus, 'error', '此瀏覽器不支援麥克風音量偵測');
+  readout.setMicStatus('error', '此瀏覽器不支援麥克風音量偵測');
 }
 
 const mic = createMicLevel({
   onLevel: (db) => {
-    setLocalDb(db);
     if (!allowMicPublish) return;
-    const published = transport?.publishMic?.({ db, ts: Date.now() });
-    if (published && typeof published.then === 'function') {
-      void published.catch((err) => showError(err.message || String(err)));
-    }
+    if (bucketDb == null || db > bucketDb) bucketDb = db;
   },
   onStatus: (status, text) => {
-    setStatus(el.micStatus, status, text);
+    readout.setMicStatus(status, text);
     syncMicButtons(status);
     if (status === 'listening') showError('');
   },
@@ -176,16 +166,11 @@ const mic = createMicLevel({
 
 const ble = new MiBandBle({
   onHeartRate: async ({ bpm, contact }) => {
-    if (bpm !== lastBpm) {
-      el.bpm.textContent = String(bpm);
-      restartPulse(el.bpm);
-      lastBpm = bpm;
-      hrHistory = pushHrSample(hrHistory, bpm);
-      renderChart();
-    }
-    el.contact.textContent = contactLabel(contact);
+    const ts = Date.now();
+    readout.pushHr(bpm, ts);
+    readout.setContact(contact);
     try {
-      await transport?.publishHr({ bpm, contact, ts: Date.now() });
+      await transport?.publishHr({ bpm, contact, ts });
     } catch (err) {
       showError(err.message || String(err));
     }
@@ -256,6 +241,7 @@ el.openMic.addEventListener('click', async () => {
   if (resumed && typeof resumed.then === 'function') {
     void resumed.catch((err) => showError(err.message || String(err)));
   }
+  startMicBucket();
   await mic.start();
 });
 
@@ -279,7 +265,9 @@ el.copyLink.addEventListener('click', async () => {
 
 window.addEventListener('beforeunload', () => {
   allowMicPublish = false;
+  stopMicBucket();
   mic.stop();
+  readout.destroy();
   transport?.leaveRoom();
 });
 

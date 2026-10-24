@@ -67,14 +67,14 @@ export function createWssTransport(cfg) {
       throw new Error('WebSocket 尚未連線');
     }
     ws.send(JSON.stringify({ type: 'hr', bpm, contact, ts }));
-  });
+  }, { minIntervalMs: 400, maxSilenceMs: 4000 });
 
   const sendMic = createMicThrottle(async ({ db, ts }) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket 尚未連線');
     }
     ws.send(JSON.stringify({ type: 'mic', db, ts }));
-  });
+  }, { minIntervalMs: 50, maxSilenceMs: 1000 });
 
   function clearReconnect() {
     if (reconnectTimer != null) {

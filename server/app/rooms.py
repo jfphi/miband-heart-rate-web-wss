@@ -13,6 +13,7 @@ from .protocol import member_public, session_replaced_message
 OFFLINE_GRACE_SECONDS = 15
 MAX_ROOM_MEMBERS = 40
 HR_MIN_INTERVAL_MS = 400
+MIC_MIN_INTERVAL_MS = 50
 TS_FUTURE_SLACK_MS = 2_000
 TS_PAST_SLACK_MS = 10_000
 MIC_DB_MIN = -100
@@ -94,12 +95,14 @@ class RoomManager:
         *,
         max_members: int = MAX_ROOM_MEMBERS,
         hr_min_interval_ms: int = HR_MIN_INTERVAL_MS,
+        mic_min_interval_ms: int = MIC_MIN_INTERVAL_MS,
     ) -> None:
         self._rooms: dict[str, Room] = {}
         self._lock = asyncio.Lock()
         self._cleanup_tasks: dict[str, asyncio.Task] = {}
         self._max_members = max_members
         self._hr_min_interval_ms = hr_min_interval_ms
+        self._mic_min_interval_ms = mic_min_interval_ms
 
     def _live_publisher(
         self,
@@ -118,8 +121,8 @@ class RoomManager:
             return "stale", room, None
         return "ok", room, member
 
-    def _throttled(self, last_at: int | None, now: int) -> bool:
-        return last_at is not None and now - last_at < self._hr_min_interval_ms
+    def _throttled(self, last_at: int | None, now: int, interval_ms: int) -> bool:
+        return last_at is not None and now - last_at < interval_ms
 
     async def join(
         self,
@@ -235,7 +238,7 @@ class RoomManager:
             if status != "ok" or room is None or member is None:
                 return status, room, None
             now = int(time.time() * 1000)
-            if self._throttled(member.last_hr_at, now):
+            if self._throttled(member.last_hr_at, now, self._hr_min_interval_ms):
                 return "drop", room, None
             member.bpm = max(0, min(250, int(bpm)))
             member.contact = None if contact is None else bool(contact)
@@ -278,7 +281,7 @@ class RoomManager:
             if status != "ok" or room is None or member is None:
                 return status, room, None
             now = int(time.time() * 1000)
-            if self._throttled(member.last_mic_at, now):
+            if self._throttled(member.last_mic_at, now, self._mic_min_interval_ms):
                 return "drop", room, None
             member.db = max(MIC_DB_MIN, min(MIC_DB_MAX, int(db)))
             member.sound_updated_at = now

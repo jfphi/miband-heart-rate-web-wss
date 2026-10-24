@@ -275,7 +275,7 @@ button.active {
 .hr-chart {
   display: block;
   width: 100%;
-  height: 56px;
+  height: 64px;
   overflow: visible;
 }
 
@@ -339,6 +339,7 @@ button.active {
 }
 
 .mic-meter {
+  position: relative;
   height: 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
@@ -349,8 +350,88 @@ button.active {
 .mic-meter-fill {
   height: 100%;
   width: 0;
-  background: linear-gradient(90deg, var(--accent-2), var(--ok));
+  background: var(--ok);
   transition: width 0.12s linear;
+}
+
+.mic-meter-fill.zone-ok {
+  background: var(--ok);
+}
+
+.mic-meter-fill.zone-warn {
+  background: var(--warn);
+}
+
+.mic-meter-fill.zone-hot {
+  background: var(--danger);
+}
+
+.mic-meter-peak {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: #f1faee;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.live-readout.is-stale {
+  opacity: 0.55;
+}
+
+.wave-canvas {
+  display: block;
+  width: 100%;
+  height: 96px;
+  margin-top: 8px;
+  border-radius: 8px;
+}
+
+.roster {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-top: 14px;
+  padding-bottom: 4px;
+}
+
+.roster-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 128px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  text-align: left;
+}
+
+.roster-item.is-selected {
+  border-color: var(--accent-2);
+}
+
+.roster-item.is-stale {
+  opacity: 0.55;
+}
+
+.roster-name {
+  font-weight: 650;
+}
+
+.roster-bpm {
+  font-family: var(--font-mono);
+  font-size: 1.2rem;
+  font-weight: 750;
+}
+
+.roster-meter {
+  width: 100%;
+  margin: 0;
 }
 
 .card .mic-meter {
