@@ -97,6 +97,21 @@ describe('renderHrSparkline', () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(5);
   });
 
+  it('fit scale opens 72–75 into a visible vertical span', () => {
+    const now = 60_000;
+    const points = [
+      { t: now - 10_000, bpm: 72 },
+      { t: now - 5_000, bpm: 75 },
+    ];
+    const opts = { width: 100, height: 50, now };
+    const preferred = polylinePoints(renderHrSparkline(points, opts)).map((p) => p.y);
+    const fitted = polylinePoints(
+      renderHrSparkline(points, { ...opts, yScale: 'fit' }),
+    ).map((p) => p.y);
+    const span = (ys) => Math.max(...ys) - Math.min(...ys);
+    expect(span(fitted)).toBeGreaterThan(span(preferred) + 10);
+  });
+
   it('maps time against the last 60s window, not first-to-last stretch', () => {
     const now = 60_000;
     const svg = renderHrSparkline([{ t: now - 10_000, bpm: 80 }], {

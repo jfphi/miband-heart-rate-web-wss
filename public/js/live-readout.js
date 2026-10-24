@@ -103,6 +103,7 @@ export function mountLiveReadout(root, options = {}) {
       now,
       preferredMin: 40,
       preferredMax: 180,
+      yScale: 'fit',
     });
     lineEl.setAttribute('points', coords);
     lineEl.style.display = coords ? '' : 'none';

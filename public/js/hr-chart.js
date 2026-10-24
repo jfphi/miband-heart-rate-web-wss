@@ -7,7 +7,7 @@ const WINDOW_MS = 60_000;
 /**
  * Y-axis domain.
  * - preferred: keep [preferredMin, preferredMax] unless data is outside
- * - fit: auto-fit data with padding (legacy / tests)
+ * - fit: scale to the samples, with padding
  *
  * @param {number[]} values
  * @param {number} preferredMin
