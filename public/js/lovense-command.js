@@ -64,7 +64,7 @@ const ACTION_NAMES = {
 
 /**
  * Basic SDK sendToyCommand only forwards a fixed field list.
- * Vibrate1/Vibrate2/Vibrate3 go out as one Function action so a sibling axis stays put.
+ * Vibrate1/Vibrate2/Vibrate3 go out alone, with stopPrevious 0, so the other motor keeps running.
  * @param {{ action?: string, level?: number, toyId?: string | null, features?: Record<string, number> }} plan
  */
 export function sdkCommandBody(plan) {
@@ -89,15 +89,17 @@ export function sdkCommandBody(plan) {
       apiVer: 1,
       action: keys.map((key) => `${ACTION_NAMES[key] || key}:${features[key]}`).join(','),
       timeSec: 0,
+      stopPrevious: 0,
       ...(plan.toyId ? { toy: plan.toyId } : {}),
     },
   };
 }
 
 /**
- * While a command is in flight, only the latest plan is kept.
+ * While a command is in flight, one plan is kept per axis.
+ * Plans without an axis still share a single slot. Stop drops queued axis updates.
  * Sends are spaced by minIntervalMs so a fast SDK cannot be flooded.
- * @param {(plan: { action: string, level: number, toyId?: string | null }) => unknown} send
+ * @param {(plan: { action: string, level: number, toyId?: string | null, axisKey?: string }) => unknown} send
  * @param {{ minIntervalMs?: number, now?: () => number, delay?: (ms: number) => Promise<void> }} [options]
  */
 export function createCommandQueue(send, options = {}) {
@@ -107,12 +109,14 @@ export function createCommandQueue(send, options = {}) {
     setTimeout(resolve, ms);
   }));
 
-  /** @type {number | null} */
+  /** @type {number | string | null} */
   let lastSent = null;
   let lastSentAt = Number.NEGATIVE_INFINITY;
   let inflight = false;
-  /** @type {{ action: string, level?: number, toyId?: string | null } | null} */
-  let pending = null;
+  /** @type {Map<string, { action: string, level?: number, toyId?: string | null, axisKey?: string, signature?: string }>} */
+  const pending = new Map();
+  /** @type {Map<string, number | string | null>} */
+  const sentByAxis = new Map();
   let generation = 0;
 
   function planToken(plan) {
@@ -120,9 +124,54 @@ export function createCommandQueue(send, options = {}) {
     return plan.signature != null ? plan.signature : (plan.level ?? null);
   }
 
+  function slotKey(plan) {
+    if (!plan?.axisKey || plan.action === 'stop') return '*';
+    return plan.axisKey;
+  }
+
   function remember(plan) {
-    if (plan.action === 'pattern') lastSent = null;
-    else lastSent = planToken(plan);
+    const key = slotKey(plan);
+    if (plan.action === 'pattern') {
+      lastSent = null;
+      sentByAxis.delete(key);
+      return;
+    }
+    const token = planToken(plan);
+    lastSent = token;
+    sentByAxis.set(key, token);
+  }
+
+  function alreadySent(plan) {
+    if (!plan || plan.action === 'pattern') return false;
+    return sentByAxis.get(slotKey(plan)) === planToken(plan);
+  }
+
+  function takePending() {
+    const nextKey = pending.keys().next();
+    if (nextKey.done) return null;
+    const next = pending.get(nextKey.value);
+    pending.delete(nextKey.value);
+    return next;
+  }
+
+  function queuePending(plan) {
+    if (plan.action === 'stop' || !plan.axisKey) {
+      pending.clear();
+      pending.set('*', plan);
+      return;
+    }
+    pending.set(plan.axisKey, plan);
+  }
+
+  async function drain(gen) {
+    while (gen === generation && pending.size) {
+      const next = takePending();
+      if (!next) return;
+      if (next.action === 'pattern' || !alreadySent(next)) {
+        await run(next, gen);
+        return;
+      }
+    }
   }
 
   async function run(plan, gen) {
@@ -147,27 +196,25 @@ export function createCommandQueue(send, options = {}) {
       inflight = false;
     }
 
-    if (gen === generation && pending) {
-      const next = pending;
-      pending = null;
-      if (next.action === 'pattern' || planToken(next) !== lastSent) {
-        await run(next, gen);
-      }
-    }
+    if (gen === generation && pending.size) await drain(gen);
     if (error) throw error;
   }
 
   return {
     async push(level) {
-      const baseline = inflight && pending && pending.action !== 'pattern'
-        ? pending.level
+      const held = pending.get('*');
+      const baseline = inflight && held && held.action !== 'pattern'
+        ? held.level
         : lastSent;
-      return this.pushPlan(planToyCommand(baseline ?? null, level));
+      return this.pushPlan(planToyCommand(
+        typeof baseline === 'number' ? baseline : null,
+        level,
+      ));
     },
     async pushPlan(plan) {
       if (!plan || plan.action === 'skip') return plan;
       if (inflight) {
-        pending = plan;
+        queuePending(plan);
         return plan;
       }
       await run(plan, generation);
@@ -177,7 +224,8 @@ export function createCommandQueue(send, options = {}) {
       generation += 1;
       lastSent = null;
       lastSentAt = Number.NEGATIVE_INFINITY;
-      pending = null;
+      pending.clear();
+      sentByAxis.clear();
       inflight = false;
     },
     get lastSent() {

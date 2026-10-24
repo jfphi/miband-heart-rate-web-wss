@@ -174,22 +174,34 @@ describe('createRemoteModel', () => {
     expect(view.controls.map((toy) => toy.name)).toEqual(['Ferri', 'Gemini 1', 'Gemini 2']);
     expect(view.series).toHaveLength(3);
 
-    model.begin('g:vibrate2', 3, 10);
+    const second = model.begin('g:vibrate2', 3, 10);
+    expect(second).toEqual([{
+      action: 'function',
+      level: 3,
+      toyId: 'g',
+      axisKey: 'vibrate2',
+      stopPrevious: 0,
+      features: { vibrate2: 3 },
+      signature: 'vibrate2:3',
+    }]);
     model.end('g:vibrate2', 11);
     const plans = model.begin('g:vibrate1', 8, 20);
     expect(plans).toEqual([{
       action: 'function',
       level: 8,
       toyId: 'g',
-      features: { vibrate1: 8, vibrate2: 3 },
-      signature: 'vibrate1:8,vibrate2:3',
+      axisKey: 'vibrate1',
+      stopPrevious: 0,
+      features: { vibrate1: 8 },
+      signature: 'vibrate1:8',
     }]);
     expect(model.view(20).controls.map((toy) => toy.level)).toEqual([0, 8, 3]);
 
     model.end('g:vibrate1', 21);
     const dropped = model.begin('g:vibrate1', 0, 30);
     expect(dropped[0].action).toBe('function');
-    expect(dropped[0].features).toEqual({ vibrate1: 0, vibrate2: 3 });
+    expect(dropped[0].features).toEqual({ vibrate1: 0 });
+    expect(dropped[0].stopPrevious).toBe(0);
 
     model.end('g:vibrate1', 31);
     const stopped = model.begin('g:vibrate2', 0, 40);
@@ -227,7 +239,8 @@ describe('createRemoteModel', () => {
     model.move('g:vibrate1', 20, 1010);
     const started = model.end('g:vibrate1', 1010);
     expect(started.some((plan) => plan.action === 'pattern')).toBe(false);
-    expect(started[0].features.vibrate2).toBe(4);
+    expect(started.every((plan) => plan.features?.vibrate2 == null)).toBe(true);
+    expect(model.view(1010).controls.find((toy) => toy.id === 'g:vibrate2').level).toBe(4);
 
     let sent = [];
     for (let t = 1060; t < 3000; t += 40) {
@@ -236,8 +249,9 @@ describe('createRemoteModel', () => {
     }
     expect(sent.length).toBeGreaterThan(0);
     expect(sent[0].action).toBe('function');
-    expect(sent[0].features.vibrate2).toBe(4);
+    expect(sent[0].features.vibrate2).toBeUndefined();
     expect(sent[0].features.vibrate1).not.toBe(started[0].features.vibrate1);
+    expect(model.view(3000).controls.find((toy) => toy.id === 'g:vibrate2').level).toBe(4);
   });
 
   it('caps a pump axis at 3', () => {

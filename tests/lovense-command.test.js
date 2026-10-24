@@ -93,6 +93,79 @@ describe('createCommandQueue', () => {
     expect(waits).toEqual([60]);
   });
 
+  it('keeps each axis while a command is in flight', async () => {
+    const sent = [];
+    let release = () => {};
+    const queue = createCommandQueue((plan) => {
+      sent.push(plan.signature);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    }, { minIntervalMs: 0 });
+
+    const done = queue.pushPlan({
+      action: 'function',
+      level: 1,
+      axisKey: 'vibrate1',
+      signature: 'vibrate1:1',
+      features: { vibrate1: 1 },
+    });
+    queue.pushPlan({
+      action: 'function',
+      level: 4,
+      axisKey: 'vibrate1',
+      signature: 'vibrate1:4',
+      features: { vibrate1: 4 },
+    });
+    queue.pushPlan({
+      action: 'function',
+      level: 3,
+      axisKey: 'vibrate2',
+      signature: 'vibrate2:3',
+      features: { vibrate2: 3 },
+    });
+    expect(sent).toEqual(['vibrate1:1']);
+
+    release();
+    await Promise.resolve();
+    expect(sent).toEqual(['vibrate1:1', 'vibrate1:4']);
+    release();
+    await Promise.resolve();
+    expect(sent).toEqual(['vibrate1:1', 'vibrate1:4', 'vibrate2:3']);
+    release();
+    await done;
+  });
+
+  it('drops queued axes when stop arrives', async () => {
+    const sent = [];
+    let release = () => {};
+    const queue = createCommandQueue((plan) => {
+      sent.push(plan.action === 'stop' ? 'stop' : plan.signature);
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    }, { minIntervalMs: 0 });
+
+    const done = queue.pushPlan({
+      action: 'function',
+      level: 8,
+      axisKey: 'vibrate1',
+      signature: 'vibrate1:8',
+    });
+    queue.pushPlan({
+      action: 'function',
+      level: 3,
+      axisKey: 'vibrate2',
+      signature: 'vibrate2:3',
+    });
+    queue.pushPlan({ action: 'stop', level: 0, signature: 'stop' });
+    release();
+    await Promise.resolve();
+    expect(sent).toEqual(['vibrate1:8', 'stop']);
+    release();
+    await done;
+  });
+
   it('passes a pattern plan through with its toy id', async () => {
     const sent = [];
     const queue = createCommandQueue(async (plan) => {
@@ -125,18 +198,19 @@ describe('sdkCommandBody', () => {
     });
   });
 
-  it('sends both Gemini motors in one Function action', () => {
+  it('sends one Gemini motor and leaves the previous command running', () => {
     expect(sdkCommandBody({
       action: 'function',
       toyId: 'gem',
-      features: { vibrate1: 8, vibrate2: 3 },
+      features: { vibrate1: 8 },
     })).toEqual({
       method: 'sendRawCommand',
       body: {
         command: 'Function',
         apiVer: 1,
-        action: 'Vibrate1:8,Vibrate2:3',
+        action: 'Vibrate1:8',
         timeSec: 0,
+        stopPrevious: 0,
         toy: 'gem',
       },
     });

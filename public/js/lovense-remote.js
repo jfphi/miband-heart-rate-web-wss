@@ -233,12 +233,79 @@ export function createRemoteModel() {
     return Object.keys(features).sort().map((key) => `${key}:${features[key]}`).join(',');
   }
 
+  function isSplitFeature(feature) {
+    return /^vibrate[1-9]$/.test(String(feature || ''));
+  }
+
+  function axisSentKey(deviceId, feature) {
+    return `${deviceId}:${feature}`;
+  }
+
+  /** Drop the combined signature and mark each sent axis dirty so the next plan refreshes it. */
+  function staleDevice(deviceId) {
+    lastSent.delete(deviceId);
+    for (const axis of deviceAxes(deviceId)) {
+      const key = axisSentKey(deviceId, axis.feature);
+      if (lastSent.has(key)) lastSent.set(key, '');
+    }
+  }
+
+  function staleAxes(rows) {
+    for (const row of rows) {
+      lastSent.delete(row.deviceId);
+      const key = axisSentKey(row.deviceId, row.feature);
+      if (lastSent.has(key)) lastSent.set(key, '');
+    }
+  }
+
+  function forgetSplit(deviceId) {
+    lastSent.delete(deviceId);
+    for (const key of [...lastSent.keys()]) {
+      if (key.startsWith(`${deviceId}:`)) lastSent.delete(key);
+    }
+  }
+
+  function splitPlans(deviceId, axes, features) {
+    const allZero = Object.values(features).every((value) => value === 0);
+    if (allZero) {
+      if (lastSent.get(deviceId) === 'stop') return [];
+      const signature = featureSignature(features);
+      forgetSplit(deviceId);
+      lastSent.set(deviceId, 'stop');
+      return [{ action: 'stop', level: 0, toyId: deviceId, features, signature }];
+    }
+    lastSent.delete(deviceId);
+    /** @type {object[]} */
+    const plans = [];
+    for (const axis of axes) {
+      const value = features[axis.feature];
+      const signature = `${axis.feature}:${value}`;
+      const key = axisSentKey(deviceId, axis.feature);
+      if (lastSent.get(key) === signature) continue;
+      if (value === 0 && !lastSent.has(key)) continue;
+      lastSent.set(key, signature);
+      plans.push({
+        action: 'function',
+        level: value,
+        toyId: deviceId,
+        axisKey: axis.feature,
+        stopPrevious: 0,
+        features: { [axis.feature]: value },
+        signature,
+      });
+    }
+    return plans;
+  }
+
   function devicePlan(deviceId, now) {
     const axes = deviceAxes(deviceId);
     if (!axes.length) return [];
     /** @type {Record<string, number>} */
     const features = {};
     for (const axis of axes) features[axis.feature] = outputOf(axis, now);
+    if (axes.some((axis) => isSplitFeature(axis.feature))) {
+      return splitPlans(deviceId, axes, features);
+    }
     const signature = featureSignature(features);
     if (lastSent.get(deviceId) === signature) return [];
     lastSent.set(deviceId, signature);
@@ -348,7 +415,7 @@ export function createRemoteModel() {
       if (seen.has(toy.deviceId)) continue;
       seen.add(toy.deviceId);
       if (isMulti(toy.deviceId)) {
-        lastSent.delete(toy.deviceId);
+        staleDevice(toy.deviceId);
         plans.push(...devicePlan(toy.deviceId, now));
       } else {
         plans.push(...holdPlans(toy.deviceId, now));
@@ -449,7 +516,10 @@ export function createRemoteModel() {
         for (const row of group) row.stroke = [];
       }
       const multi = !localSync && isMulti(toy.deviceId);
-      if (wasLooping) lastSent.delete(localSync ? '*' : toy.deviceId);
+      if (wasLooping) {
+        if (localSync) lastSent.delete('*');
+        else staleAxes(group);
+      }
       const plans = applyLevel(id, level, now);
       if (wasLooping && !multi && plans[0] && plans[0].action !== 'stop') {
         return [{ action: 'stop', level: 0, toyId: localSync ? null : toy.deviceId }, ...plans];
