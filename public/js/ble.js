@@ -15,15 +15,15 @@ const MSG = {
   short16: '16-bit 心率資料不足',
   short8: '8-bit 心率資料不足',
   noWebBt: '此瀏覽器不支援 Web Bluetooth，請使用 Chrome 或 Edge',
-  pickBand: '選擇小米手環…',
+  pickBand: '選擇心率裝置…',
   cancelled: '已取消連線',
-  restoring: '還原手環連線…',
+  restoring: '還原心率裝置連線…',
   idle: '未連線',
   btDropped: '藍牙已斷線',
-  advertTimeout: '等待手環廣播逾時，請確認手環已開啟心率並靠近電腦',
+  advertTimeout: '等待心率廣播逾時，請確認裝置已開啟心率廣播並靠近電腦',
   noGatt: '裝置缺少 GATT',
-  gattDropNow: 'GATT 連線後立即斷開，請確認手環已開啟心率並靠近電腦',
-  gattDrop: 'GATT 連線中斷，請確認手環已開啟心率偵測、靠近電腦後再試',
+  gattDropNow: 'GATT 連線後立即斷開，請確認裝置已開啟心率廣播並靠近電腦',
+  gattDrop: 'GATT 連線中斷，請確認裝置已開啟心率偵測、靠近電腦後再試',
   gattFail: 'GATT 連線失敗',
   reconnectCap: '重連次數已達上限',
   hrReady: '正在啟動心率通知…',
@@ -379,7 +379,7 @@ export class MiBandBle {
     this.advertAbort = abort;
     this.onStatus?.(
       'scanning',
-      `等待手環廣播：${device.name || 'MiBand'}…`,
+      `等待心率廣播：${device.name || '心率裝置'}…`,
     );
 
     let settled = false;
@@ -520,7 +520,7 @@ export class MiBandBle {
     this.notificationsStarted = false;
     this.onStatus?.(
       'connecting',
-      `連線中：${this.device.name || 'MiBand'}…`,
+      `連線中：${this.device.name || '心率裝置'}…`,
     );
 
     if (this.characteristic && this.handler) {
@@ -627,7 +627,7 @@ export class MiBandBle {
         this.autoReconnectCount = 0;
         this.onStatus?.(
           'connected',
-          `已連線：${this.device?.name || 'MiBand'}`,
+          `已連線：${this.device?.name || '心率裝置'}`,
         );
         return;
       } catch (err) {
@@ -642,7 +642,7 @@ export class MiBandBle {
         }
         this.onStatus?.(
           'connecting',
-          `連線不穩，重試 ${attempt}/${this.gattAttempts - 1}：${this.device?.name || 'MiBand'}…`,
+          `連線不穩，重試 ${attempt}/${this.gattAttempts - 1}：${this.device?.name || '心率裝置'}…`,
         );
         await sleep(250 * attempt);
       }

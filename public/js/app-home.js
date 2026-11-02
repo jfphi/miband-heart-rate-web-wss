@@ -1,4 +1,5 @@
 import { formatDisplayVersion, loadConfig } from './config.js';
+import { renderDeviceSupport } from './device-support.js';
 import { createTransport } from './transport/index.js';
 import { buildPageUrl } from './util.js';
 
@@ -10,6 +11,11 @@ const joinBtn = document.getElementById('joinBtn');
 const homeError = document.getElementById('homeError');
 const backendHint = document.getElementById('backendHint');
 const appVersion = document.getElementById('appVersion');
+
+renderDeviceSupport(
+  document.getElementById('deviceSupportList'),
+  document.getElementById('deviceSupportNote'),
+);
 
 function showError(msg) {
   homeError.hidden = !msg;

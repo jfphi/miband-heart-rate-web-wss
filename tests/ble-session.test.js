@@ -106,7 +106,7 @@ describe('isGattDisconnectedError', () => {
     ).toBe(true);
     expect(
       isGattDisconnectedError(
-        new Error('GATT 連線後立即斷開，請確認手環已開啟心率並靠近電腦'),
+        new Error('GATT 連線後立即斷開，請確認裝置已開啟心率廣播並靠近電腦'),
       ),
     ).toBe(true);
   });

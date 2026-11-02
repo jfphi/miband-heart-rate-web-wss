@@ -1,6 +1,6 @@
 # 多人心率監看平台（Firebase + FastAPI WSS）
 
-用瀏覽器 Web Bluetooth 讀取小米手環「心率廣播」，再透過即時後端同步給同房間其他人監看。
+用瀏覽器 Web Bluetooth 讀取標準藍牙心率廣播，再透過即時後端同步給同房間其他人監看。
 
 後端模式由 **`.env` 的 `MIBAND_BACKEND`** 決定（不在 UI 選擇）：
 
@@ -11,20 +11,101 @@
 
 ## 功能
 
-- 發布端：Chrome / Edge + Web Bluetooth 連手環並推流
+- 發布端：Chrome / Edge + Web Bluetooth 連心率裝置並推流
 - 監看端：任何瀏覽器進房間看多人心率卡片
 - 房間碼分享連結
 - bpm 節流：相同值不重送，有變化最多約 1Hz
 - 佩戴狀態可為未知（`contact: null`，不會被當成未接觸）
 - 麥克風只同步音量 dBFS，不錄音、不傳聲音
-- 同房間被新分頁取代時，舊連線立即停止手環與麥克風
+- 同房間被新分頁取代時，舊連線立即停止心率裝置與麥克風
 - 可選：發布頁與監看頁的 Remote 風格控制（波形、圓鈕、Float / Loop / Traditional / Local Sync，強度 0–20）。只控制這台瀏覽器用 Lovense Remote 授權的玩具，不進房間、不跟心率連動。三個 `LOVENSE_*` 沒設齊時，這塊面板不會出現
 
-## 手環設定
+## 裝置支援
 
-1. 在手環開啟 **心率廣播 / Share HR**
-2. 確保手環未被其他 App 佔用藍牙連線
-3. 發布端使用 **Chrome 或 Edge**
+發布端只連接標準藍牙心率服務（`0x180D`）。請先打開心率廣播，並讓手機 App 放開藍牙。發布端使用 **Chrome 或 Edge**。
+
+未逐型號確認的不寫進可以或不行。COROS 有藍牙心率廣播，但沒有型號表，所以不列入。
+
+### 小米
+
+可以：
+
+- 手環 3
+- 手環 9（韌體 1.3.206 起）
+- 手環 9 Pro（韌體 1.3.153 起）
+- 手環 10、10 NFC、10 陶瓷版、10 耀影金
+
+不行：手環 7、手環 7 Pro、手環 8、手環 8 Active、手環 8 Pro
+
+### Amazfit
+
+可以：
+
+- Band 5
+- 初代 Bip
+- Neo（先在 Zepp 打開可被發現與活動心率分享）
+- Active、Active 2（圓錶與方錶）
+- Bip 6
+- Balance、Balance 2
+- GTR 4、GTS 4
+- T-Rex 3、T-Rex Ultra
+- Helio Strap
+
+### Garmin
+
+可以：
+
+- Forerunner 55、245、255、265、745、945、955、965
+- fēnix 6、fēnix 6 Pro、fēnix 7、fēnix 8
+- Instinct 2
+- Venu 2、Venu 3、Venu 4
+- vívoactive 5、vívoactive 6
+
+不行（只廣播 ANT+）：fēnix 5 及更早、Forerunner 235、vívoactive 4 及同系列更早款、Lily 全系列、vívomove 全系列
+
+### Polar
+
+可以：Ignite 2、Pacer
+
+### Suunto
+
+可以：Race、Race S、Race 2、Vertical 2（需有心率廣播的韌體，並在運動模式開啟）
+
+不行：9 Peak Pro、Vertical 初代
+
+### 華為
+
+可以：
+
+- Band 8、9、10、11
+- Watch Fit 3、WATCH FIT、WATCH D
+- WATCH GT 3、WATCH GT 4
+- WATCH D2
+- WATCH 5、WATCH Ultimate 2（省電模式才看得到心率廣播）
+
+### Fitbit／Google
+
+可以：Charge 6、Fitbit Air、Pixel Watch 2 及之後
+
+不行：Charge 5 及更早、Sense、Sense 2、Versa、Versa 4、Inspire、Luxe
+
+### WHOOP
+
+可以：3.0、4.0、5.0（在 WHOOP App 打開 Broadcast Heart Rate）
+
+### 迪卡儂
+
+可以：HRM Band
+
+### 三星
+
+可以：Galaxy Watch 4 及之後（手錶需安裝 Heart for Bluetooth）
+
+不行：Galaxy Watch 3、Galaxy Watch Active2 及更早
+
+### Apple
+
+不行：Apple Watch 全系列，含 SE 與 Ultra
 
 ## 環境變數（`.env`）
 
@@ -63,7 +144,7 @@ uv sync
 uv run python main.py
 ```
 
-開啟 <http://localhost:18080> → 建立房間 → 連接手環 → 分享監看連結。
+開啟 <http://localhost:18080> → 建立房間 → 連接心率裝置 → 分享監看連結。
 
 ## Firebase 模式
 

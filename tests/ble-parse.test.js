@@ -163,7 +163,7 @@ describe('mapBleUiStatus', () => {
   it('resumes only after connected', () => {
     expect(mapBleUiStatus('connected', '已連線').hr).toBe('resume');
     expect(mapBleUiStatus('connecting', '連線中').hr).toBe('pause');
-    expect(mapBleUiStatus('scanning', '選擇小米手環…').hr).toBe('pause');
+    expect(mapBleUiStatus('scanning', '選擇心率裝置…').hr).toBe('pause');
     expect(mapBleUiStatus('disconnected', '藍牙已斷線').hr).toBe('pause');
     expect(mapBleUiStatus('idle', '未連線').hr).toBe('pause');
   });

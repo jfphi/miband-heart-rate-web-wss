@@ -327,6 +327,34 @@ button.active {
   line-height: 1.45;
 }
 
+.device-support {
+  margin-top: 16px;
+}
+
+.device-support h2 {
+  margin: 0 0 8px;
+}
+
+.brand-block + .brand-block {
+  margin-top: 18px;
+}
+
+.brand-block h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.brand-block ul {
+  margin: 0 0 8px;
+  padding-left: 1.2em;
+}
+
+.brand-label {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .footer-note {
   margin-top: 24px;
   color: var(--muted);

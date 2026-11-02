@@ -113,7 +113,7 @@ function showError(msg) {
 }
 
 function syncBleConnectLabel() {
-  el.connectBle.textContent = hasPersistedBleSession() ? '重新連線' : '連接小米手環';
+  el.connectBle.textContent = hasPersistedBleSession() ? '重新連線' : '連接心率裝置';
 }
 
 if (!room) {
@@ -281,7 +281,7 @@ async function connectOrRestore({ allowPicker = true } = {}) {
       await ble.connect();
     }
     el.disconnectBle.disabled = false;
-    el.connectBle.textContent = '連接小米手環';
+    el.connectBle.textContent = '連接心率裝置';
   } catch (err) {
     if (!isCancelledError(err)) {
       showError(err);
