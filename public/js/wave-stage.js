@@ -1,7 +1,13 @@
 import { drawWaveform, WAVE_WINDOW_MS, waveformLayout } from './audio/waveform.js';
+import { domainY } from './hr-chart.js';
 import { drawRemoteWave } from './lovense-wave.js';
 
 const LANE_H = 64;
+const HEART_PAD = 6;
+/** Shrink time constant. Expand is immediate. */
+export const HEART_DOMAIN_TAU_MS = 280;
+/** A longer gap (hidden tab) snaps the scale instead of easing across it. */
+export const HEART_DOMAIN_GAP_MS = 1000;
 
 /** Shared time axis: the same timestamp lands on the same x in every lane. */
 export function seriesX(t, now, width, windowMs = WAVE_WINDOW_MS) {
@@ -11,12 +17,12 @@ export function seriesX(t, now, width, windowMs = WAVE_WINDOW_MS) {
 }
 
 /**
- * Heart polyline inside the 12 second window. The last sample is held to now.
+ * Samples drawn in the window: in-range points, the sample just before the
+ * left edge (so the line enters from the side), and a hold of the last bpm to now.
  * @param {{ t: number, bpm: number }[]} samples
+ * @returns {{ t: number, bpm: number }[]}
  */
-export function heartPoints(samples, now, width, height, windowMs = WAVE_WINDOW_MS) {
-  const w = Math.max(1, Number(width) || 1);
-  const h = Math.max(1, Number(height) || 1);
+export function heartSeries(samples, now, windowMs = WAVE_WINDOW_MS) {
   const t0 = now - windowMs;
   const sorted = (samples || [])
     .filter((p) => p && Number.isFinite(p.t) && Number.isFinite(p.bpm) && p.t <= now)
@@ -28,22 +34,95 @@ export function heartPoints(samples, now, width, height, windowMs = WAVE_WINDOW_
   if (before) series.unshift({ t: t0, bpm: before.bpm });
   const last = series[series.length - 1];
   if (last && last.t < now) series.push({ t: now, bpm: last.bpm });
-  const pad = 6;
-  const inner = Math.max(1, h - pad * 2);
+  return series;
+}
+
+/**
+ * Fit Y domain for the visible heart samples. Empty data keeps 40–180.
+ * @param {{ bpm: number }[]} series
+ * @returns {[number, number]}
+ */
+export function heartDomain(series) {
+  return domainY((series || []).map((p) => p.bpm), 40, 180, 'fit');
+}
+
+/**
+ * Expand a held domain immediately. Shrink toward the target with a time constant.
+ * No held domain, or a gap of HEART_DOMAIN_GAP_MS, snaps to the target.
+ * @param {[number, number] | null} current
+ * @param {[number, number] | null} target
+ * @param {number} dtMs
+ * @returns {[number, number] | null}
+ */
+export function stepHeartDomain(current, target, dtMs, tauMs = HEART_DOMAIN_TAU_MS) {
+  if (!target) return null;
+  if (!current) return [target[0], target[1]];
+  const dt = Number(dtMs);
+  if (!Number.isFinite(dt) || dt <= 0) return [current[0], current[1]];
+  if (dt >= HEART_DOMAIN_GAP_MS) return [target[0], target[1]];
+  const shrink = 1 - Math.exp(-dt / tauMs);
+  return [0, 1].map((i) => {
+    const from = current[i];
+    const to = target[i];
+    const expanding = i === 0 ? to < from : to > from;
+    if (expanding) return to;
+    return from + (to - from) * shrink;
+  });
+}
+
+/**
+ * Domain for this frame. No visible samples clears it. Otherwise ease.
+ * @param {[number, number] | null} current
+ * @param {{ bpm: number }[]} series
+ * @param {number} dtMs
+ * @returns {[number, number] | null}
+ */
+export function advanceHeartDomain(current, series, dtMs) {
+  if (!series || !series.length) return null;
+  return stepHeartDomain(current, heartDomain(series), dtMs);
+}
+
+/**
+ * True when `next` still contains the last sample of `prev` (same history, new points).
+ * A different person, a cleared lane, or the first sample does not continue.
+ * @param {{ t: number, bpm: number }[]} prev
+ * @param {{ t: number, bpm: number }[]} next
+ */
+export function continuesHeartSeries(prev, next) {
+  if (!prev?.length || !next?.length) return false;
+  const last = prev[prev.length - 1];
+  return next.some((p) => p && p.t === last.t && p.bpm === last.bpm);
+}
+
+/**
+ * Heart polyline inside the 12 second window. The last sample is held to now.
+ * Y uses `domain` when given, otherwise the fit domain of this window.
+ * @param {{ t: number, bpm: number }[]} samples
+ * @param {number} [windowMs]
+ * @param {[number, number] | null} [domain]
+ */
+export function heartPoints(samples, now, width, height, windowMs = WAVE_WINDOW_MS, domain) {
+  const w = Math.max(1, Number(width) || 1);
+  const h = Math.max(1, Number(height) || 1);
+  const series = heartSeries(samples, now, windowMs);
+  if (!series.length) return [];
+  const [min, max] = domain || heartDomain(series);
+  const span = max - min || 1;
+  const inner = Math.max(1, h - HEART_PAD * 2);
   return series.map((p) => {
-    const bpm = Math.min(180, Math.max(40, p.bpm));
+    const y = HEART_PAD + (1 - (p.bpm - min) / span) * inner;
     return {
       x: seriesX(p.t, now, w, windowMs),
-      y: pad + (1 - (bpm - 40) / 140) * inner,
+      y: Math.min(h - HEART_PAD, Math.max(HEART_PAD, y)),
     };
   });
 }
 
-function drawHeart(ctx, samples, now, width, height) {
+function drawHeart(ctx, samples, now, width, height, domain) {
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = '#12151c';
   ctx.fillRect(0, 0, width, height);
-  const pts = heartPoints(samples, now, width, height);
+  const pts = heartPoints(samples, now, width, height, WAVE_WINDOW_MS, domain);
   if (pts.length < 2) return;
   ctx.strokeStyle = '#e63946';
   ctx.lineWidth = 2;
@@ -101,6 +180,9 @@ export function mountWaveStage(root) {
   const soundCanvas = root.querySelector('[data-lane="sound"]');
   const toyCanvas = root.querySelector('[data-lane="toy"]');
   let heart = [];
+  /** @type {[number, number] | null} */
+  let heldDomain = null;
+  let lastHeartPaint = 0;
   let sound = [];
   /** @type {{ color?: string, samples?: { t: number, level: number }[] }[]} */
   let toys = [];
@@ -124,7 +206,13 @@ export function mountWaveStage(root) {
 
   function paint(now) {
     const heartBox = size(heartCanvas);
-    if (heartBox) drawHeart(heartBox.ctx, heart, now, heartBox.cssW, LANE_H);
+    if (heartBox) {
+      const dt = lastHeartPaint ? now - lastHeartPaint : 0;
+      const series = heartSeries(heart, now);
+      heldDomain = advanceHeartDomain(heldDomain, series, dt);
+      lastHeartPaint = now;
+      drawHeart(heartBox.ctx, heart, now, heartBox.cssW, LANE_H, heldDomain);
+    }
 
     const soundBox = size(soundCanvas);
     if (soundBox) {
@@ -167,7 +255,9 @@ export function mountWaveStage(root) {
 
   return {
     setHeart(points) {
-      heart = points || [];
+      const next = points || [];
+      if (!continuesHeartSeries(heart, next)) heldDomain = null;
+      heart = next;
     },
     setSound(points) {
       sound = points || [];
